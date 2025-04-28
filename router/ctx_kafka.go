@@ -3,7 +3,6 @@ package router
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"runtime/debug"
 
@@ -83,12 +82,12 @@ func (s *SubscriptionManager) startSubscriber(ctx context.Context, topic string,
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Printf("shutting down subscriber for topic %s", topic)
+			s.Logger.Logf("shutting down subscriber for topic %s", topic)
 			return nil
 		default:
 			err := s.handleSubscription(ctx, topic, handler)
 			if err != nil {
-				fmt.Printf("error in subscription for topic %s: %v", topic, err)
+				s.Logger.Errorf("error in subscription for topic %s: %v", topic, err)
 			}
 		}
 	}
@@ -98,8 +97,7 @@ func (s *SubscriptionManager) handleSubscription(ctx context.Context, topic stri
 	msg, err := s.KafkaClient.Subscribe(ctx, topic)
 
 	if err != nil {
-		fmt.Printf("error while reading from topic %v, err: %v", topic, err.Error())
-
+		s.Logger.Errorf("error while reading from topic %v, err: %v", topic, err.Error())
 		return err
 	}
 
@@ -111,14 +109,15 @@ func (s *SubscriptionManager) handleSubscription(ctx context.Context, topic stri
 	msgCtx := newContext(nil, msg, s.KafkaClient, s.Logger)
 	err = func(ctx *Context) error {
 		defer func() {
-			panicRecovery(recover())
+			panicRecovery(recover(), ctx.Logger)
 		}()
 
 		return handler(ctx)
 	}(msgCtx)
 
 	if err != nil {
-		fmt.Printf("error in handler for topic %s: %v", topic, err)
+		// fmt.Printf("error in handler for topic %s: %v", topic, err)
+		s.Logger.Errorf("error in handler for topic %s: %v", topic, err)
 
 		return nil
 	}
@@ -131,12 +130,12 @@ func (s *SubscriptionManager) handleSubscription(ctx context.Context, topic stri
 	return nil
 }
 
-type PanicLog struct {
+type panicLog struct {
 	Error      string `json:"error,omitempty"`
 	StackTrace string `json:"stack_trace,omitempty"`
 }
 
-func panicRecovery(re any) {
+func panicRecovery(re any, log Logger) {
 	if re == nil {
 		return
 	}
@@ -151,5 +150,8 @@ func panicRecovery(re any) {
 		e = "Unknown panic type"
 	}
 
-	fmt.Printf("Error: %s\nStackTrace: %s\n", e, string(debug.Stack()))
+	log.Error(panicLog{
+		Error:      e,
+		StackTrace: string(debug.Stack()),
+	})
 }
