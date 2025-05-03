@@ -41,10 +41,17 @@ func newContext(w http.ResponseWriter, r Request, k kafkaService.KafkaClient, lo
 }
 
 func (c *Context) Publish(ctx context.Context, topic string, message any) error {
+	var msg []byte
 
-	msg, err := json.Marshal(message)
-	if err != nil {
-		return err
+	if _, ok := message.([]byte); ok {
+		msg = message.([]byte)
+	} else {
+		var err error
+		msg, err = json.Marshal(message)
+		if err != nil {
+			c.Logger.Errorf("failed to marshal message: %v", err)
+			return err
+		}
 	}
 
 	return c.KafkaClient.Publish(ctx, topic, msg)
