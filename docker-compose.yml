@@ -33,7 +33,7 @@ services:
     container_name: kafka-ui
     image: provectuslabs/kafka-ui:latest
     ports:
-      - 8080:8080
+      - 8081:8080
     depends_on:
       - "kafka"
     environment:
@@ -43,11 +43,12 @@ services:
       KAFKA_CLUSTERS_0_AUDIT_TOPICAUDITENABLED: 'true'
       KAFKA_CLUSTERS_0_AUDIT_CONSOLEAUDITENABLED: 'true'
   jaeger:
-    image: jaegertracing/all-in-one:1.56
+    image: jaegertracing/all-in-one:1.41
     container_name: jaeger
-    environment:
-      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
     ports:
       - "16686:16686"   # Jaeger UI
-      - "4318:4318"     # OpenTelemetry (OTLP) collector
-    restart: always
+      - "14317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped

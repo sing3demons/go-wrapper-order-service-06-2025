@@ -28,6 +28,15 @@ func NewRouter() *Router {
 }
 
 func (rou *Router) Add(method, pattern string, handler http.Handler) {
-	h := otelhttp.NewHandler(handler, "router")
+	h := otelhttp.NewHandler(handler, "gokp-router")
 	rou.Router.NewRoute().Methods(method).Path(pattern).Handler(h)
+}
+
+func (rou *Router) UseMiddleware(mws ...Middleware) {
+	middlewares := make([]mux.MiddlewareFunc, 0, len(mws))
+	for _, m := range mws {
+		middlewares = append(middlewares, mux.MiddlewareFunc(m))
+	}
+
+	rou.Use(middlewares...)
 }

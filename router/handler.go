@@ -11,8 +11,8 @@ import (
 	"github.com/gorilla/websocket"
 	"go.opentelemetry.io/otel/trace"
 
-	kafkaService "github.com/sing3demons/go-order-service/kafka"
-	gofrHTTP "github.com/sing3demons/go-order-service/pkg/http"
+	kafkaService "github.com/sing3demons/go-order-service/pkg/kafka"
+	gokpHTTP "github.com/sing3demons/go-order-service/pkg/http"
 )
 
 const colorCodeError = 202 // 202 is red color code
@@ -49,7 +49,7 @@ func (el *ErrorLogEntry) PrettyPrint(writer io.Writer) {
 }
 
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	c := newContext(w, gofrHTTP.NewRequest(r), h.KafkaClient, h.Logger)
+	c := newContext(w, gokpHTTP.NewRequest(r), h.KafkaClient, h.Logger)
 	traceID := trace.SpanFromContext(r.Context()).SpanContext().TraceID().String()
 
 	if websocket.IsWebSocketUpgrade(r) {

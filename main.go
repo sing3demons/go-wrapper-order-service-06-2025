@@ -1,79 +1,82 @@
 package main
 
+// import (
+// 	"encoding/json"
+// 	"fmt"
+
+// 	"gofr.dev/pkg/gofr"
+// )
+
+// func main() {
+// 	app := gofr.New()
+
+// 	var index uint64 = 1
+
+// 	app.GET("/test", func(ctx *gofr.Context) (any, error) {
+// 			type orderStatus struct {
+// 			OrderId string `json:"orderId"`
+// 			Status  string `json:"status"`
+// 		}
+
+// 		data := orderStatus{
+// 			OrderId: fmt.Sprintf("order-%d", index),
+// 			Status:  "shipped",
+// 		}
+
+// 		msg, _ := json.Marshal(data)
+
+// 		err := ctx.GetPublisher().Publish(ctx, "order-logs", msg)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		index++
+// 		return map[string]string{"message": "test"}, nil
+// 	})
+
+// 	app.Run() // listens and serves on localhost:8000
+// }
+
+// package main
+
 import (
 	"context"
 	"fmt"
 
-	kafkaService "github.com/sing3demons/go-order-service/kafka"
+	"github.com/sing3demons/go-order-service/pkg/kafka"
+	"github.com/sing3demons/go-order-service/pkg/logger"
 	"github.com/sing3demons/go-order-service/router"
-	"go.uber.org/zap"
+	"go.opentelemetry.io/otel/trace"
 )
 
-type kafkaLogger struct {
-	*zap.Logger
-}
-
-func (k *kafkaLogger) Debugf(format string, args ...any) {
-	k.Logger.Sugar().Debugf(format, args...)
-}
-
-func (k *kafkaLogger) Debug(args ...any) {
-	k.Logger.Sugar().Debug(args...)
-}
-
-func (k *kafkaLogger) Logf(format string, args ...any) {
-	k.Logger.Sugar().Infof(format, args...)
-}
-func (k *kafkaLogger) Log(args ...any) {
-	k.Logger.Sugar().Info(args...)
-}
-func (k *kafkaLogger) Errorf(format string, args ...any) {
-	// fmt.Printf(format, args...)
-	k.Logger.Sugar().Errorf(format, args...)
-}
-func (k *kafkaLogger) Error(args ...any) {
-	k.Logger.Sugar().Error(args...)
-}
-
-func NewLogger(logger *zap.Logger) kafkaService.Logger {
-	return &kafkaLogger{Logger: logger}
-}
-
 func main() {
-	ZLogger, err := zap.NewDevelopment()
-	if err != nil {
-		panic(err)
-	}
-	defer ZLogger.Sync()
-
-	logger := NewLogger(ZLogger)
-	logger.Debugf("test debug %s", "test")
+	log := logger.NewLogger()
+	defer log.Sync()
 
 	conf := &router.Config{
-		AppName:    "go-app",
-		AppPort:    "8080",
+		AppName:    "gokp-app",
+		AppPort:    "3000",
 		AppVersion: "1.0.0",
-		KafkaConfig: kafkaService.Config{
+		KafkaConfig: kafka.Config{
 			Broker:          "localhost:29092",
 			BatchSize:       100,
 			BatchBytes:      1048576,
 			BatchTimeout:    1000,
 			ConsumerGroupID: "test-group",
+			AutoCreateTopic: true,
 		},
 		TracerHost: "localhost:4318",
 	}
 
-	app := router.NewApplication(conf, logger)
+	app := router.NewApplication(conf, log)
 
-	var index uint64 = 0
+	app.Get("/ping", func(c *router.Context) error {
+		traceID := trace.SpanFromContext(c).SpanContext().TraceID().String()
 
-	app.Get("/test", func(c *router.Context) error {
-		c.Publish(context.Background(), "test-topic", "test_message_"+fmt.Sprint(index))
-		index++
+		c.Publish("test-topic", "test_message_"+traceID)
 		return c.JSON(200, map[string]string{"message": "test"})
 	})
 
-	app.Subscribe("test-topic", func(c *router.Context) error {
+	app.Consumer("test-topic", func(c *router.Context) error {
 		var msg string
 		if err := c.Bind(&msg); err != nil {
 			fmt.Println("Error binding message:", err)

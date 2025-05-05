@@ -9,6 +9,7 @@ import (
 
 	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -48,7 +49,15 @@ type Config struct {
 	SASLUser         string
 	SASLPassword     string
 	SecurityProtocol string
-	// TLS              TLSConfig
+	TLS              TLSConfig
+	AutoCreateTopic  bool
+}
+
+type TLSConfig struct {
+	CertFile           string
+	KeyFile            string
+	CACertFile         string
+	InsecureSkipVerify bool
 }
 
 type kafkaClient struct {
@@ -62,7 +71,6 @@ type kafkaClient struct {
 
 	logger Logger
 	config Config
-	// metrics Metrics
 }
 
 type KafkaClient interface {
@@ -79,7 +87,6 @@ func New(conf *Config, logger Logger) KafkaClient {
 	err := validateConfigs(conf)
 	if err != nil {
 		logger.Errorf("could not initialize kafka, error: %v", err)
-
 		return nil
 	}
 
@@ -109,7 +116,6 @@ func New(conf *Config, logger Logger) KafkaClient {
 		logger: logger,
 		writer: writer,
 		mu:     &sync.RWMutex{},
-		// metrics: metrics,
 	}
 }
 
@@ -142,10 +148,10 @@ func validateRequiredFields(conf *Config) error {
 }
 
 func (k *kafkaClient) Publish(ctx context.Context, topic string, message []byte) error {
-	ctx, span := otel.GetTracerProvider().Tracer("kp").Start(ctx, "kafka-publish")
+	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID().String()
+	fmt.Printf("Trace ID: %s from kafka\n", traceID)
+	ctx, span := otel.GetTracerProvider().Tracer("gokp").Start(ctx, "kafka-publish")
 	defer span.End()
-
-	// k.metrics.IncrementCounter(ctx, "app_pubsub_publish_total_count", "topic", topic)
 
 	if k.writer == nil || topic == "" {
 		return errPublisherNotConfigured
@@ -194,7 +200,7 @@ func (k *kafkaClient) Subscribe(ctx context.Context, topic string) (*Message, er
 		return &Message{}, ErrConsumerGroupNotProvided
 	}
 
-	ctx, span := otel.GetTracerProvider().Tracer("kp").Start(ctx, "kafka-subscribe")
+	ctx, span := otel.GetTracerProvider().Tracer("gokp").Start(ctx, "kafka-subscribe")
 	defer span.End()
 
 	// k.metrics.IncrementCounter(ctx, "app_pubsub_subscribe_total_count", "topic", topic, "consumer_group", k.config.ConsumerGroupID)

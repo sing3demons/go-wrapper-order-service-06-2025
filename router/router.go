@@ -5,17 +5,20 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
-	kafkaService "github.com/sing3demons/go-order-service/kafka"
+	kafkaService "github.com/sing3demons/go-order-service/pkg/kafka"
 	httpService "github.com/sing3demons/go-order-service/pkg/http"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+
 	"golang.org/x/sync/errgroup"
 )
 
@@ -24,6 +27,7 @@ type App struct {
 	httpServer    *httpService.Router
 	traceProvider *trace.TracerProvider
 	Logger
+	conf *Config
 }
 
 type Config struct {
@@ -44,30 +48,46 @@ func NewApplication(conf *Config, logger Logger) *App {
 	if conf.AppVersion == "" {
 		conf.AppVersion = "1.0.0"
 	}
-	kafkaClient := kafkaService.New(&conf.KafkaConfig, logger)
-	httpServiceClient := httpService.NewRouter()
 
-	subscriptionManager := newSubscriptionManager(kafkaClient, logger)
+	var traceProvider *trace.TracerProvider
+	if conf.TracerHost != "" {
+		tp, err := startTracing(conf.AppName, conf.TracerHost)
+		if err != nil {
+			logger.Errorf("failed to start tracing: %v", err)
+		} else {
+			traceProvider = tp
+		}
 
-	app := &App{
-		SubscriptionManager: subscriptionManager,
-		httpServer:          httpServiceClient,
-		Logger:              logger,
 	}
 
-	if conf.TracerHost != "" {
-		traceProvider, err := app.startTracing(conf.AppName, conf.TracerHost)
-		if err == nil {
-			app.traceProvider = traceProvider
-			traceProvider.Tracer("http")
-		} else {
-			logger.Errorf("failed to start tracing: %v", err)
-		}
+	app := &App{
+		Logger: logger,
+		conf:   conf,
+	}
+
+	kafkaClient := kafkaService.New(&conf.KafkaConfig, logger)
+	httpServiceClient := httpService.NewRouter()
+	app.httpServer = httpServiceClient
+	if traceProvider != nil {
+		app.traceProvider = traceProvider
+		app.httpServer.UseMiddleware(func(handler http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ctx := r.Context()
+				ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
+				tr := otel.GetTracerProvider().Tracer("gokp-dev")
+				ctx, span := tr.Start(ctx, fmt.Sprintf("%s %s", strings.ToUpper(r.Method), r.URL.Path))
+				defer span.End()
+				handler.ServeHTTP(w, r.WithContext(ctx))
+			})
+		})
+	}
+	if kafkaClient != nil {
+		app.SubscriptionManager = newSubscriptionManager(kafkaClient, logger)
 	}
 	return app
 }
-func (a *App) add(method, pattern string, h Handler) {
 
+func (a *App) add(method, pattern string, h Handler) {
 	a.httpServer.Add(method, pattern, handler{
 		function:       h,
 		requestTimeout: time.Duration(10) * time.Second,
@@ -76,7 +96,7 @@ func (a *App) add(method, pattern string, h Handler) {
 	})
 }
 
-func (a *App) startTracing(appName, endpoint string) (*trace.TracerProvider, error) {
+func startTracing(appName, endpoint string) (*trace.TracerProvider, error) {
 	headers := map[string]string{
 		"content-type": "application/json",
 	}
@@ -149,16 +169,23 @@ func (a *App) GetSubscriber() kafkaService.Subscriber {
 
 	return a.KafkaClient
 }
-func (a *App) Subscribe(topic string, handler SubscribeFunc) {
+func (a *App) Consumer(topic string, handler SubscribeFunc) {
 	if topic == "" || handler == nil {
 		a.Logger.Error("invalid subscription: topic and handler must not be empty or nil")
-
 		return
 	}
 
 	if a.GetSubscriber() == nil {
 		a.Logger.Error("subscriber not initialized in the container")
 		return
+	}
+
+	if a.conf.KafkaConfig.AutoCreateTopic {
+		err := a.KafkaClient.CreateTopic(topic)
+		if err != nil {
+			a.Logger.Error("failed to create topic %s: %v", topic, err)
+			return
+		}
 	}
 
 	a.SubscriptionManager.subscriptions[topic] = handler
@@ -188,7 +215,7 @@ func (a *App) Start(ctx context.Context) {
 	// Start HTTP Server
 	wg.Add(1)
 	s := &http.Server{
-		Addr:           ":3000",
+		Addr:           ":" + a.conf.AppPort,
 		Handler:        a.httpServer,
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,

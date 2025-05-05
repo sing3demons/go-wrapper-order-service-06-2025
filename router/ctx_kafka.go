@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"runtime/debug"
 
-	kafkaService "github.com/sing3demons/go-order-service/kafka"
+	kafkaService "github.com/sing3demons/go-order-service/pkg/kafka"
 )
 
 type Context struct {
@@ -40,7 +40,7 @@ func newContext(w http.ResponseWriter, r Request, k kafkaService.KafkaClient, lo
 	}
 }
 
-func (c *Context) Publish(ctx context.Context, topic string, message any) error {
+func (c *Context) Publish(topic string, message any) error {
 	var msg []byte
 
 	if _, ok := message.([]byte); ok {
@@ -54,7 +54,7 @@ func (c *Context) Publish(ctx context.Context, topic string, message any) error 
 		}
 	}
 
-	return c.KafkaClient.Publish(ctx, topic, msg)
+	return c.KafkaClient.Publish(c.Context, topic, msg)
 }
 
 func (c *Context) JSON(code int, v any) error {
