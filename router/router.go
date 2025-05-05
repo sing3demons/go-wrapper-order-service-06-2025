@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	kafkaService "github.com/sing3demons/go-order-service/pkg/kafka"
 	httpService "github.com/sing3demons/go-order-service/pkg/http"
+	kafkaService "github.com/sing3demons/go-order-service/pkg/kafka"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -223,6 +223,7 @@ func (a *App) Start(ctx context.Context) {
 	}
 
 	go func() {
+		defer wg.Done()
 		fmt.Println("server started at", s.Addr)
 		if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal("listen:", err)
