@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
+	config "github.com/sing3demons/go-order-service/configs"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -36,30 +38,6 @@ const (
 	protocolSASLSSL     = "SASL_SSL"
 )
 
-type Config struct {
-	Broker           string
-	Partition        int
-	ConsumerGroupID  string
-	OffSet           int
-	BatchSize        int
-	BatchBytes       int
-	BatchTimeout     int
-	RetryTimeout     time.Duration
-	SASLMechanism    string
-	SASLUser         string
-	SASLPassword     string
-	SecurityProtocol string
-	TLS              TLSConfig
-	AutoCreateTopic  bool
-}
-
-type TLSConfig struct {
-	CertFile           string
-	KeyFile            string
-	CACertFile         string
-	InsecureSkipVerify bool
-}
-
 type kafkaClient struct {
 	dialer *kafka.Dialer
 	conn   Connection
@@ -70,7 +48,7 @@ type kafkaClient struct {
 	mu *sync.RWMutex
 
 	logger Logger
-	config Config
+	config config.KafkaConfig
 }
 
 type KafkaClient interface {
@@ -83,7 +61,7 @@ type KafkaClient interface {
 	CreateTopic(name string) error
 }
 
-func New(conf *Config, logger Logger) KafkaClient {
+func New(conf *config.KafkaConfig, logger Logger) KafkaClient {
 	err := validateConfigs(conf)
 	if err != nil {
 		logger.Errorf("could not initialize kafka, error: %v", err)
@@ -119,7 +97,7 @@ func New(conf *Config, logger Logger) KafkaClient {
 	}
 }
 
-func validateConfigs(conf *Config) error {
+func validateConfigs(conf *config.KafkaConfig) error {
 	if err := validateRequiredFields(conf); err != nil {
 		return err
 	}
@@ -127,7 +105,7 @@ func validateConfigs(conf *Config) error {
 	return nil
 }
 
-func validateRequiredFields(conf *Config) error {
+func validateRequiredFields(conf *config.KafkaConfig) error {
 	if conf.Broker == "" {
 		return errBrokerNotProvided
 	}
@@ -232,6 +210,13 @@ func (k *kafkaClient) Subscribe(ctx context.Context, topic string) (*Message, er
 		return nil, err
 	}
 
+	session := ctx.Value("x-session-id")
+	if session == nil {
+		// set context with session if not already set
+		ctx = context.WithValue(ctx, "x-session-id", uuid.NewString())
+
+	}
+
 	m := NewMessage(ctx)
 	m.Value = msg.Value
 	m.Topic = topic
@@ -270,7 +255,7 @@ func (k *kafkaClient) Close() (err error) {
 	return err
 }
 
-func initializeKafkaClient(conf *Config, logger Logger) (*kafka.Dialer, Connection, Writer, map[string]Reader, error) {
+func initializeKafkaClient(conf *config.KafkaConfig, logger Logger) (*kafka.Dialer, Connection, Writer, map[string]Reader, error) {
 	dialer := &kafka.Dialer{
 		Timeout:   10 * time.Second,
 		DualStack: true,
@@ -342,7 +327,7 @@ func (k *kafkaClient) CreateTopic(name string) error {
 }
 
 // retryConnect handles the retry mechanism for connecting to the Kafka broker.
-func retryConnect(client *kafkaClient, conf *Config, logger Logger) {
+func retryConnect(client *kafkaClient, conf *config.KafkaConfig, logger Logger) {
 	for {
 		time.Sleep(defaultRetryTimeout)
 

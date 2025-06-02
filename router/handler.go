@@ -11,8 +11,10 @@ import (
 	"github.com/gorilla/websocket"
 	"go.opentelemetry.io/otel/trace"
 
-	kafkaService "github.com/sing3demons/go-order-service/pkg/kafka"
+	config "github.com/sing3demons/go-order-service/configs"
+	commonlog "github.com/sing3demons/go-order-service/pkg/common-log"
 	gokpHTTP "github.com/sing3demons/go-order-service/pkg/http"
+	kafkaService "github.com/sing3demons/go-order-service/pkg/kafka"
 )
 
 const colorCodeError = 202 // 202 is red color code
@@ -36,7 +38,8 @@ type handler struct {
 	function       Handler
 	requestTimeout time.Duration
 	kafkaService.KafkaClient
-	Logger
+	Logger commonlog.LoggerService
+	conf   *config.AppConfig
 }
 
 type ErrorLogEntry struct {
@@ -49,7 +52,7 @@ func (el *ErrorLogEntry) PrettyPrint(writer io.Writer) {
 }
 
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	c := newContext(w, gokpHTTP.NewRequest(r), h.KafkaClient, h.Logger)
+	c := newContext(w, gokpHTTP.NewRequest(r), h.KafkaClient, h.Logger, h.conf)
 	traceID := trace.SpanFromContext(r.Context()).SpanContext().TraceID().String()
 
 	if websocket.IsWebSocketUpgrade(r) {

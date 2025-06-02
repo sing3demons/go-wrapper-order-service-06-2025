@@ -8,7 +8,9 @@ import (
 	"reflect"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var errNotPointer = errors.New("input should be a pointer to a variable")
@@ -41,6 +43,33 @@ func (m *Message) Param(p string) string {
 	}
 
 	return ""
+}
+
+func (k *Message) SessionId() string {
+	session := k.ctx.Value("x-session-id")
+	if session == nil {
+		// set context with session if not already set
+		session = uuid.New().String()
+		k.ctx = context.WithValue(k.ctx, "x-session-id", session)
+	}
+	if sessionStr, ok := session.(string); ok {
+		return sessionStr
+	}
+	return trace.SpanFromContext(k.ctx).SpanContext().TraceID().String()
+}
+
+// TransactionId() string
+func (m *Message) TransactionId() string {
+	transaction := m.ctx.Value("x-transaction-id")
+	if transaction == nil {
+		// set context with transaction if not already set
+		transaction = uuid.New().String()
+		m.ctx = context.WithValue(m.ctx, "x-transaction-id", transaction)
+	}
+	if transactionStr, ok := transaction.(string); ok {
+		return transactionStr
+	}
+	return trace.SpanFromContext(m.ctx).SpanContext().TraceID().String()
 }
 
 func (m *Message) PathParam(p string) string {
@@ -110,7 +139,7 @@ func (m *Message) bindStruct(i any) error {
 	return json.Unmarshal(m.Value, i)
 }
 
-func (*Message) HostName() string {
+func (m *Message) HostName() string {
 	return ""
 }
 

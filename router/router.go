@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	config "github.com/sing3demons/go-order-service/configs"
+	commonlog "github.com/sing3demons/go-order-service/pkg/common-log"
 	httpService "github.com/sing3demons/go-order-service/pkg/http"
 	kafkaService "github.com/sing3demons/go-order-service/pkg/kafka"
 	"go.opentelemetry.io/otel"
@@ -26,19 +28,11 @@ type App struct {
 	SubscriptionManager
 	httpServer    *httpService.Router
 	traceProvider *trace.TracerProvider
-	Logger
-	conf *Config
+	Logger        commonlog.LoggerService
+	conf          *config.AppConfig
 }
 
-type Config struct {
-	AppName     string              `json:"app_name"`
-	AppPort     string              `json:"app_port"`
-	AppVersion  string              `json:"app_version"`
-	KafkaConfig kafkaService.Config `json:"kafka"`
-	TracerHost  string              `json:"tracer_host"`
-}
-
-func NewApplication(conf *Config, logger Logger) *App {
+func NewApplication(conf *config.AppConfig, logger commonlog.LoggerService) *App {
 	if conf.AppName == "" {
 		conf.AppName = "go-order-service"
 	}
@@ -57,7 +51,6 @@ func NewApplication(conf *Config, logger Logger) *App {
 		} else {
 			traceProvider = tp
 		}
-
 	}
 
 	app := &App{
@@ -82,7 +75,7 @@ func NewApplication(conf *Config, logger Logger) *App {
 		})
 	}
 	if kafkaClient != nil {
-		app.SubscriptionManager = newSubscriptionManager(kafkaClient, logger)
+		app.SubscriptionManager = newSubscriptionManager(kafkaClient, logger, conf)
 	}
 	return app
 }
@@ -93,6 +86,7 @@ func (a *App) add(method, pattern string, h Handler) {
 		requestTimeout: time.Duration(10) * time.Second,
 		KafkaClient:    a.SubscriptionManager.KafkaClient,
 		Logger:         a.Logger,
+		conf:           a.conf,
 	})
 }
 

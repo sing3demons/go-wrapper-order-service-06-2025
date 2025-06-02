@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"runtime/debug"
+	"time"
 
+	config "github.com/sing3demons/go-order-service/configs"
+	commonlog "github.com/sing3demons/go-order-service/pkg/common-log"
 	kafkaService "github.com/sing3demons/go-order-service/pkg/kafka"
 )
 
@@ -14,7 +17,9 @@ type Context struct {
 	Request
 	http.ResponseWriter
 	kafkaService.KafkaClient
-	Logger
+	Logger commonlog.LoggerService
+	Log    commonlog.CustomLoggerService
+	conf   *config.AppConfig
 }
 
 type Request interface {
@@ -24,20 +29,40 @@ type Request interface {
 	Bind(any) error
 	HostName() string
 	Params(string) []string
+	SessionId() string
+	TransactionId() string
 }
 
 func (c *Context) Bind(i any) error {
 	return c.Request.Bind(i)
 }
 
-func newContext(w http.ResponseWriter, r Request, k kafkaService.KafkaClient, logger Logger) *Context {
+func newContext(w http.ResponseWriter, r Request, k kafkaService.KafkaClient, logger commonlog.LoggerService, conf *config.AppConfig) *Context {
 	return &Context{
 		Context:        r.Context(),
 		Request:        r,
 		ResponseWriter: w,
 		KafkaClient:    k,
 		Logger:         logger,
+		conf:           conf,
 	}
+}
+
+func (c *Context) CommonLog() commonlog.CustomLoggerService {
+	kpLog := commonlog.NewLogger(c.Logger)
+	kpLog.Init(commonlog.LogDto{
+		TransactionId:    c.Request.TransactionId(),
+		SessionId:        c.Request.SessionId(),
+		AppName:          c.conf.AppName,
+		ComponentVersion: c.conf.AppVersion,
+		ComponentName:    c.conf.AppName,
+		Instance:         c.Request.HostName(),
+		DateTime:         time.Now().Format(time.RFC3339),
+	})
+
+	c.Log = kpLog
+
+	return kpLog
 }
 
 func (c *Context) Publish(topic string, message any) error {
@@ -73,14 +98,16 @@ type SubscribeFunc func(c *Context) error
 type SubscriptionManager struct {
 	kafkaService.KafkaClient
 	subscriptions map[string]SubscribeFunc
-	Logger
+	Logger        commonlog.LoggerService
+	conf          *config.AppConfig
 }
 
-func newSubscriptionManager(kafkaSvc kafkaService.KafkaClient, logger Logger) SubscriptionManager {
+func newSubscriptionManager(kafkaSvc kafkaService.KafkaClient, logger commonlog.LoggerService, conf *config.AppConfig) SubscriptionManager {
 	return SubscriptionManager{
 		KafkaClient:   kafkaSvc,
 		subscriptions: make(map[string]SubscribeFunc),
 		Logger:        logger,
+		conf:          conf,
 	}
 }
 
@@ -113,7 +140,7 @@ func (s *SubscriptionManager) handleSubscription(ctx context.Context, topic stri
 	}
 
 	// newContext creates a new context from the msg.Context()
-	msgCtx := newContext(nil, msg, s.KafkaClient, s.Logger)
+	msgCtx := newContext(nil, msg, s.KafkaClient, s.Logger, s.conf)
 	err = func(ctx *Context) error {
 		defer func() {
 			panicRecovery(recover(), ctx.Logger)
@@ -142,7 +169,7 @@ type panicLog struct {
 	StackTrace string `json:"stack_trace,omitempty"`
 }
 
-func panicRecovery(re any, log Logger) {
+func panicRecovery(re any, log commonlog.LoggerService) {
 	if re == nil {
 		return
 	}

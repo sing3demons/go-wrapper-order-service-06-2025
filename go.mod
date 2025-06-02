@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
+	github.com/joho/godotenv v1.5.1
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/stretchr/testify v1.10.0
 	go.mongodb.org/mongo-driver v1.17.3
@@ -17,6 +18,7 @@ require (
 	go.uber.org/mock v0.5.2
 	go.uber.org/zap v1.18.1
 	golang.org/x/sync v0.13.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (

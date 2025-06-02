@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
@@ -33,6 +34,20 @@ type Request struct {
 
 // NewRequest creates a new GoFr Request instance from the given http.Request.
 func NewRequest(r *http.Request) *Request {
+	sessionId := r.Header.Get("X-Session-Id")
+	if sessionId == "" {
+		sessionId = uuid.New().String()
+		r.Header.Set("X-Session-Id", sessionId)
+	}
+	transactionId := r.Header.Get("X-Transaction-Id")
+	if transactionId == "" {
+		if r.Header.Get("X-Tid") != "" {
+			transactionId = r.Header.Get("X-Tid")
+		} else {
+			transactionId = uuid.New().String()
+		}
+		r.Header.Set("X-Transaction-Id", transactionId)
+	}
 	return &Request{
 		req:        r,
 		pathParams: mux.Vars(r),
@@ -47,6 +62,10 @@ func (r *Request) Param(key string) string {
 // Context returns the context of the request.
 func (r *Request) Context() context.Context {
 	return r.req.Context()
+}
+
+func (r *Request) Header(key string) string {
+	return r.req.Header.Get(key)
 }
 
 // PathParam retrieves a path parameter from the request.
@@ -178,4 +197,28 @@ func (r *Request) bindBinary(raw any) error {
 	*byteSlicePtr = body
 
 	return nil
+}
+
+func (r *Request) SessionId() string {
+	sessionId := r.req.Header.Get("X-Session-Id")
+	if sessionId == "" {
+		sessionId = uuid.New().String()
+		r.req.Header.Set("X-Session-Id", sessionId)
+	}
+
+	return sessionId
+}
+
+func (r *Request) TransactionId() string {
+	transactionId := r.req.Header.Get("X-Transaction-Id")
+	if transactionId == "" {
+		if r.req.Header.Get("X-Tid") != "" {
+			transactionId = r.req.Header.Get("X-Tid")
+		} else {
+			transactionId = uuid.New().String()
+		}
+		r.req.Header.Set("X-Transaction-Id", transactionId)
+	}
+
+	return transactionId
 }
