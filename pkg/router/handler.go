@@ -39,7 +39,7 @@ type handler struct {
 	requestTimeout time.Duration
 	kafkaService.KafkaClient
 	Logger commonlog.LoggerService
-	conf   *config.AppConfig
+	conf   *config.Config
 }
 
 type ErrorLogEntry struct {

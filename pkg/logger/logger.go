@@ -3,10 +3,13 @@ package logger
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	config "github.com/sing3demons/go-order-service/configs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -55,87 +58,23 @@ func (k *zLogger) Error(args ...any) {
 	k.Logger.Sugar().Error(args...)
 }
 
-func NewLogger() ILogger {
-	encoderConfig := map[string]any{
-		"messageKey": "msg",
-		"InitialFields": map[string]any{
-			"pid": os.Getpid(),
-		},
-	}
-	data, _ := json.Marshal(encoderConfig)
-	var encCfg zapcore.EncoderConfig
-	if err := json.Unmarshal(data, &encCfg); err != nil {
-		return nil
+func NewLogger(cfg *config.Config) ILogger {
+	logger, err := BuildZapLogger(cfg.Log.Detail, true)
+	if err != nil {
+		log.Fatalf("failed to build detail logger: %v", err)
 	}
 
-	// add the encoder config and rotator to create a new zap logger
-	w := zapcore.AddSync(os.Stdout)
-	encoder := zapcore.NewConsoleEncoder(encCfg)
-	core := zapcore.NewCore(
-		encoder,
-		w,
-		zap.InfoLevel)
-
-	summaryCore := zapcore.NewCore(
-		encoder,
-		w,
-		zap.InfoLevel)
-
-	if os.Getenv("LOG_PATH") != "" {
-		path := os.Getenv("LOG_PATH")
-		logFile := filepath.Join(path, getLogFileName(time.Now()))
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			if err := os.MkdirAll(path, 0755); err != nil {
-				fmt.Printf("Failed to create log directory: %v\n", err)
-				return nil
-			}
-		}
-		fileEncoder := zapcore.NewConsoleEncoder(encCfg)
-		// Setting up lumberjack logger for log rotation
-		writerSync := zapcore.AddSync(&lumberjack.Logger{
-			Filename:   logFile,
-			MaxSize:    500, // megabytes
-			MaxBackups: 3,   // number of backups
-			MaxAge:     1,   // days
-			LocalTime:  true,
-			Compress:   true, // compress the backups
-		})
-
-		logSummaryFile := filepath.Join("logs/summary", getLogFileName(time.Now()))
-		if _, err := os.Stat(filepath.Join("logs", "summary")); os.IsNotExist(err) {
-			if err := os.MkdirAll(filepath.Join("logs", "summary"), 0755); err != nil {
-				fmt.Printf("Failed to create summary log directory: %v\n", err)
-				return nil
-			}
-		}
-
-		writerSyncSummary := zapcore.AddSync(&lumberjack.Logger{
-			Filename:   logSummaryFile,
-			MaxSize:    500, // megabytes
-			MaxBackups: 3,   // number of backups
-			MaxAge:     1,   // days
-			LocalTime:  true,
-			Compress:   true, // compress the backups
-		})
-
-		core = zapcore.NewTee(
-			zapcore.NewCore(fileEncoder, writerSync, zap.InfoLevel),
-			zapcore.NewCore(zapcore.NewConsoleEncoder(encCfg), w, zap.InfoLevel),
-		)
-
-		summaryCore = zapcore.NewTee(
-			zapcore.NewCore(fileEncoder, writerSyncSummary, zap.InfoLevel),
-			zapcore.NewCore(zapcore.NewConsoleEncoder(encCfg), w, zap.InfoLevel),
-		)
+	summaryLogger, err := BuildZapLogger(cfg.Log.Summary, true)
+	if err != nil {
+		log.Fatalf("failed to build summary logger: %v", err)
 	}
-
-	logger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zap.ErrorLevel))
 
 	if os.Getenv("MODE") == "test" {
 		logger = zap.NewNop()
 	}
 	customLog := &zLogger{Logger: logger,
-		summaryLogger: zap.New(summaryCore, zap.AddCaller(), zap.AddStacktrace(zap.ErrorLevel))}
+		summaryLogger: summaryLogger,
+	}
 
 	return customLog
 }
@@ -148,10 +87,101 @@ func (k *zLogger) SummaryLog() *zap.Logger {
 	return k.summaryLogger
 }
 
-func getLogFileName(t time.Time) string {
-	appName := ""
-	year, month, day := t.Date()
-	hour, minute, second := t.Clock()
+// formatFilename replaces %DATE% with the actual date using the pattern
+func formatFilename(dirname, filenamePattern, datePattern, extension string) string {
+	now := time.Now()
+	formattedDate := now.Format(convertDatePattern(datePattern)) // translate custom to Go layout
+	filename := strings.ReplaceAll(filenamePattern, "%DATE%", formattedDate)
+	return filepath.Join(dirname, filename+extension)
+}
 
-	return fmt.Sprintf("%s_%04d%02d%02d_%02d%02d%02d.log", appName, year, month, day, hour, minute, second)
+// convertDatePattern converts common formats like "YYYY-MM-DD-HH" to Go's time layout
+func convertDatePattern(pattern string) string {
+	replacer := strings.NewReplacer(
+		"YYYY", "2006",
+		"MM", "01",
+		"DD", "02",
+		"HH", "15",
+		"mm", "04",
+		"ss", "05",
+	)
+	return replacer.Replace(pattern)
+}
+
+type LogFileProperties struct {
+	Dirname     string `json:"dirname" yaml:"dirname"`
+	Filename    string `json:"filename" yaml:"filename"`
+	DatePattern string `json:"date-pattern" yaml:"date-pattern"`
+	Extension   string `json:"extension" yaml:"extension"`
+}
+
+func newWriteSyncer(p LogFileProperties) zapcore.WriteSyncer {
+	file := formatFilename(p.Dirname, p.Filename, p.DatePattern, p.Extension)
+	return zapcore.AddSync(&lumberjack.Logger{
+		Filename:   file,
+		MaxSize:    500, // MB
+		MaxBackups: 3,
+		MaxAge:     1, // Days
+		LocalTime:  true,
+		Compress:   true,
+	})
+}
+
+type LogConfig struct {
+	Level             string            `json:"level" yaml:"level"`
+	EnableFileLogging bool              `json:"enable-file-logging" yaml:"enable-file-logging"`
+	LogFileProperties LogFileProperties `json:"log-file-properties" yaml:"log-file-properties"`
+}
+
+func getZapLevel(levelStr string) zapcore.Level {
+	switch strings.ToLower(levelStr) {
+	case "debug":
+		return zapcore.DebugLevel
+	case "info":
+		return zapcore.InfoLevel
+	case "warn":
+		return zapcore.WarnLevel
+	case "error":
+		return zapcore.ErrorLevel
+	default:
+		return zapcore.InfoLevel
+	}
+}
+
+func BuildZapLogger(cfg config.LogConfig, withConsole bool) (*zap.Logger, error) {
+	encoderConfig := map[string]any{
+		"messageKey": "msg",
+	}
+	data, _ := json.Marshal(encoderConfig)
+	var encCfg zapcore.EncoderConfig
+	if err := json.Unmarshal(data, &encCfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal encoder config: %w", err)
+	}
+	encoder := zapcore.NewConsoleEncoder(encCfg)
+
+	var cores []zapcore.Core
+
+	if cfg.EnableFileLogging {
+		ws := newWriteSyncer(LogFileProperties{
+			Dirname:     cfg.LogFileProperties.Dirname,
+			Filename:    cfg.LogFileProperties.Filename,
+			DatePattern: cfg.LogFileProperties.DatePattern,
+			Extension:   cfg.LogFileProperties.Extension,
+		})
+		level := getZapLevel(cfg.Level)
+		core := zapcore.NewCore(encoder, ws, level)
+		cores = append(cores, core)
+	}
+
+	if withConsole {
+		consoleEncoder := zapcore.NewConsoleEncoder(encCfg)
+		consoleCore := zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), getZapLevel(cfg.Level))
+		cores = append(cores, consoleCore)
+	}
+
+	if len(cores) == 0 {
+		cores = append(cores, zapcore.NewNopCore())
+	}
+
+	return zap.New(zapcore.NewTee(cores...)), nil
 }

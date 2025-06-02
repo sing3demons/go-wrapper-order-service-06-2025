@@ -3,6 +3,7 @@ module github.com/sing3demons/go-order-service
 go 1.24.0
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
@@ -19,6 +20,7 @@ require (
 	go.uber.org/zap v1.18.1
 	golang.org/x/sync v0.13.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
@@ -28,7 +30,6 @@ require (
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.3 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
@@ -52,6 +53,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250428153025-10db94c68c34 // indirect
 	google.golang.org/grpc v1.72.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

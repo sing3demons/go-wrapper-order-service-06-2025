@@ -32,21 +32,30 @@ type Request struct {
 	pathParams map[string]string
 }
 
+const (
+	// XSessionIdHeader is the header key for the session ID.
+	XSessionIdHeader = "X-Session-Id"
+	// XTransactionIdHeader is the header key for the transaction ID.
+	XTransactionIdHeader = "X-Transaction-Id"
+	// XTidHeader is the header key for the transaction ID (legacy).
+	XTidHeader = "X-Tid"
+)
+
 // NewRequest creates a new GoFr Request instance from the given http.Request.
 func NewRequest(r *http.Request) *Request {
-	sessionId := r.Header.Get("X-Session-Id")
+	sessionId := r.Header.Get(XSessionIdHeader)
 	if sessionId == "" {
 		sessionId = uuid.New().String()
-		r.Header.Set("X-Session-Id", sessionId)
+		r.Header.Set(XSessionIdHeader, sessionId)
 	}
-	transactionId := r.Header.Get("X-Transaction-Id")
+	transactionId := r.Header.Get(XTransactionIdHeader)
 	if transactionId == "" {
-		if r.Header.Get("X-Tid") != "" {
-			transactionId = r.Header.Get("X-Tid")
+		if r.Header.Get(XTidHeader) != "" {
+			transactionId = r.Header.Get(XTidHeader)
 		} else {
 			transactionId = uuid.New().String()
 		}
-		r.Header.Set("X-Transaction-Id", transactionId)
+		r.Header.Set(XTransactionIdHeader, transactionId)
 	}
 	return &Request{
 		req:        r,
@@ -200,24 +209,24 @@ func (r *Request) bindBinary(raw any) error {
 }
 
 func (r *Request) SessionId() string {
-	sessionId := r.req.Header.Get("X-Session-Id")
+	sessionId := r.req.Header.Get(XSessionIdHeader)
 	if sessionId == "" {
 		sessionId = uuid.New().String()
-		r.req.Header.Set("X-Session-Id", sessionId)
+		r.req.Header.Set(XSessionIdHeader, sessionId)
 	}
 
 	return sessionId
 }
 
 func (r *Request) TransactionId() string {
-	transactionId := r.req.Header.Get("X-Transaction-Id")
+	transactionId := r.req.Header.Get(XTransactionIdHeader)
 	if transactionId == "" {
-		if r.req.Header.Get("X-Tid") != "" {
-			transactionId = r.req.Header.Get("X-Tid")
+		if r.req.Header.Get(XTidHeader) != "" {
+			transactionId = r.req.Header.Get(XTidHeader)
 		} else {
 			transactionId = uuid.New().String()
 		}
-		r.req.Header.Set("X-Transaction-Id", transactionId)
+		r.req.Header.Set(XTransactionIdHeader, transactionId)
 	}
 
 	return transactionId

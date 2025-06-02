@@ -53,7 +53,7 @@ func New(c Config) *Client {
 }
 
 // UseLogger sets the logger for the MongoDB client which asserts the Logger interface.
-func (c *Client) UseLogger(logger any) {
+func (c *Client) UseLogger(logger Logger) {
 	if l, ok := logger.(Logger); ok {
 		c.logger = l
 	}
@@ -73,11 +73,11 @@ func (c *Client) UseTracer(tracer any) {
 	}
 }
 
-func (c *Client) Connect() {
+func (c *Client) Connect() *mongo.Client {
 	uri, host, err := generateMongoURI(c.config)
 	if err != nil {
 		c.logger.Errorf("error generating MongoDB URI: %v", err)
-		return
+		return nil
 	}
 
 	c.logger.Debugf("connecting to MongoDB at %v to database %v", c.config.Host, c.config.Database)
@@ -94,20 +94,20 @@ func (c *Client) Connect() {
 	if err != nil {
 		c.logger.Errorf("error while connecting to MongoDB, err:%v", err)
 
-		return
+		return nil
 	}
 
 	if err = m.Ping(ctx, nil); err != nil {
 		c.logger.Errorf("could not connect to MongoDB at %v due to err: %v", host, err)
-		return
+		return nil
 	}
 
-	mongoBuckets := []float64{.05, .075, .1, .125, .15, .2, .3, .5, .75, 1, 2, 3, 4, 5, 7.5, 10}
-	c.metrics.NewHistogram("app_mongo_stats", "Response time of MongoDB queries in milliseconds.", mongoBuckets...)
+	database := m.Database(c.config.Database)
+	c.Database = database
 
-	c.Database = m.Database(c.config.Database)
+	// c.logger.Logf("connected to MongoDB at %v to database %v", host, c.config.Database)
 
-	c.logger.Logf("connected to MongoDB at %v to database %v", host, c.config.Database)
+	return m
 }
 
 func generateMongoURI(config *Config) (uri, host string, err error) {

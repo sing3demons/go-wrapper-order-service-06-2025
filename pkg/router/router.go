@@ -29,23 +29,24 @@ type App struct {
 	httpServer    *httpService.Router
 	traceProvider *trace.TracerProvider
 	Logger        commonlog.LoggerService
-	conf          *config.AppConfig
+	conf          *config.Config
 }
 
-func NewApplication(conf *config.AppConfig, logger commonlog.LoggerService) *App {
-	if conf.AppName == "" {
-		conf.AppName = "go-order-service"
-	}
-	if conf.AppPort == "" {
-		conf.AppPort = "3000"
-	}
-	if conf.AppVersion == "" {
-		conf.AppVersion = "1.0.0"
-	}
+type IApplication interface {
+	Get(pattern string, handler Handler)
+	Put(pattern string, handler Handler)
+	Post(pattern string, handler Handler)
+	Delete(pattern string, handler Handler)
+	Patch(pattern string, handler Handler)
+	Consumer(topic string, handler SubscribeFunc)
+	Start(ctx context.Context)
+	CreateTopic(topic string)
+}
 
+func NewApplication(conf *config.Config, logger commonlog.LoggerService) IApplication {
 	var traceProvider *trace.TracerProvider
 	if conf.TracerHost != "" {
-		tp, err := startTracing(conf.AppName, conf.TracerHost)
+		tp, err := startTracing(conf.App.Name, conf.TracerHost)
 		if err != nil {
 			logger.Errorf("failed to start tracing: %v", err)
 		} else {
@@ -58,7 +59,7 @@ func NewApplication(conf *config.AppConfig, logger commonlog.LoggerService) *App
 		conf:   conf,
 	}
 
-	kafkaClient := kafkaService.New(&conf.KafkaConfig, logger)
+	kafkaClient := kafkaService.New(&conf.Kafka, logger)
 	httpServiceClient := httpService.NewRouter()
 	app.httpServer = httpServiceClient
 	if traceProvider != nil {
@@ -174,7 +175,7 @@ func (a *App) Consumer(topic string, handler SubscribeFunc) {
 		return
 	}
 
-	if a.conf.KafkaConfig.AutoCreateTopic {
+	if a.conf.Kafka.AutoCreateTopic {
 		err := a.KafkaClient.CreateTopic(topic)
 		if err != nil {
 			a.Logger.Error("failed to create topic %s: %v", topic, err)
@@ -204,12 +205,17 @@ func (a *App) startSubscriptions(ctx context.Context) error {
 }
 
 func (a *App) Start(ctx context.Context) {
+	if a.conf.Server.AppPort == "" {
+		a.Logger.Error("server port is not configured")
+		return
+	}
+	a.Logger.Log("starting application on port: " + a.conf.Server.AppPort)
 	wg := sync.WaitGroup{}
 
 	// Start HTTP Server
 	wg.Add(1)
 	s := &http.Server{
-		Addr:           ":" + a.conf.AppPort,
+		Addr:           ":" + a.conf.Server.AppPort,
 		Handler:        a.httpServer,
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,

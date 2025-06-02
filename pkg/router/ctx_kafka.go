@@ -9,6 +9,7 @@ import (
 
 	config "github.com/sing3demons/go-order-service/configs"
 	commonlog "github.com/sing3demons/go-order-service/pkg/common-log"
+	"github.com/sing3demons/go-order-service/pkg/common-log/logAction"
 	kafkaService "github.com/sing3demons/go-order-service/pkg/kafka"
 )
 
@@ -19,7 +20,7 @@ type Context struct {
 	kafkaService.KafkaClient
 	Logger commonlog.LoggerService
 	Log    commonlog.CustomLoggerService
-	conf   *config.AppConfig
+	conf   *config.Config
 }
 
 type Request interface {
@@ -37,7 +38,7 @@ func (c *Context) Bind(i any) error {
 	return c.Request.Bind(i)
 }
 
-func newContext(w http.ResponseWriter, r Request, k kafkaService.KafkaClient, logger commonlog.LoggerService, conf *config.AppConfig) *Context {
+func newContext(w http.ResponseWriter, r Request, k kafkaService.KafkaClient, logger commonlog.LoggerService, conf *config.Config) *Context {
 	return &Context{
 		Context:        r.Context(),
 		Request:        r,
@@ -53,9 +54,9 @@ func (c *Context) CommonLog() commonlog.CustomLoggerService {
 	kpLog.Init(commonlog.LogDto{
 		TransactionId:    c.Request.TransactionId(),
 		SessionId:        c.Request.SessionId(),
-		AppName:          c.conf.AppName,
-		ComponentVersion: c.conf.AppVersion,
-		ComponentName:    c.conf.AppName,
+		AppName:          c.conf.App.Name,
+		ComponentVersion: c.conf.App.Version,
+		ComponentName:    c.conf.App.ComponentName,
 		Instance:         c.Request.HostName(),
 		DateTime:         time.Now().Format(time.RFC3339),
 	})
@@ -65,8 +66,15 @@ func (c *Context) CommonLog() commonlog.CustomLoggerService {
 	return kpLog
 }
 
-func (c *Context) Publish(topic string, message any) error {
+func (c *Context) Publish(ctx *Context, topic string, message any) error {
 	var msg []byte
+	start := time.Now()
+
+	ctx.Log.Info(logAction.PRODUCING(topic, ""), map[string]any{
+		"body": map[string]any{
+			"topic": topic,
+			"value": message,
+		}})
 
 	if _, ok := message.([]byte); ok {
 		msg = message.([]byte)
@@ -78,8 +86,23 @@ func (c *Context) Publish(topic string, message any) error {
 			return err
 		}
 	}
+	description := "success"
 
-	return c.KafkaClient.Publish(c.Context, topic, msg)
+	if err := c.KafkaClient.Publish(c.Context, topic, msg); err != nil {
+		description = err.Error()
+		c.Logger.Errorf("failed to publish message to topic %s: %v", topic, err)
+	}
+	end := time.Since(start)
+	c.Log.Info(logAction.PRODUCED(topic, ""), description)
+	c.Log.AddSummary(commonlog.EventTag{
+		Node:        "kafka",
+		Command:     topic,
+		Code:        "200",
+		Description: description,
+		ResTime:     end.Microseconds(),
+	})
+
+	return nil
 }
 
 func (c *Context) JSON(code int, v any) error {
@@ -99,10 +122,10 @@ type SubscriptionManager struct {
 	kafkaService.KafkaClient
 	subscriptions map[string]SubscribeFunc
 	Logger        commonlog.LoggerService
-	conf          *config.AppConfig
+	conf          *config.Config
 }
 
-func newSubscriptionManager(kafkaSvc kafkaService.KafkaClient, logger commonlog.LoggerService, conf *config.AppConfig) SubscriptionManager {
+func newSubscriptionManager(kafkaSvc kafkaService.KafkaClient, logger commonlog.LoggerService, conf *config.Config) SubscriptionManager {
 	return SubscriptionManager{
 		KafkaClient:   kafkaSvc,
 		subscriptions: make(map[string]SubscribeFunc),
