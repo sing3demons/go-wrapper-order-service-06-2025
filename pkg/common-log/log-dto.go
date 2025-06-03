@@ -57,6 +57,7 @@ type LogDto struct {
 	RecordType           string      `json:"recordType,omitempty"`
 	SessionId            string      `json:"sessionId,omitempty"`
 	TransactionId        string      `json:"transactionId,omitempty"`
+	RequestId           string      `json:"requestId,omitempty"`
 	AdditionalInfo       any         `json:"additionalInfo,omitempty"`
 	AppResult            string      `json:"appResult,omitempty"`
 	AppResultCode        string      `json:"appResultCode,omitempty"`

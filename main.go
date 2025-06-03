@@ -1,11 +1,12 @@
 package main
 
 import (
-	"context"
 	"os"
 
 	config "github.com/sing3demons/go-order-service/configs"
 	"github.com/sing3demons/go-order-service/mongo"
+	commonlog "github.com/sing3demons/go-order-service/pkg/common-log"
+	"github.com/sing3demons/go-order-service/pkg/common-log/logAction"
 	"github.com/sing3demons/go-order-service/pkg/logger"
 	"github.com/sing3demons/go-order-service/pkg/router"
 	"github.com/sing3demons/go-order-service/product"
@@ -50,5 +51,28 @@ func main() {
 	// 	return nil
 	// })
 
-	app.Start(context.Background())
+	app.Consumer("product_created", func(c *router.Context) error {
+		var req router.KafkaPayload
+		if err := c.Bind(&req); err != nil {
+			c.Log.Error(logAction.CONSUMING("product_created", ""), "Failed to bind request body", err)
+			c.Log.AddSummary(commonlog.EventTag{
+				Node:        "consuming",
+				Command:     "product_created",
+				Code:        "400",
+				Description: err.Error(),
+			})
+			return err
+		}
+		c.Log.Info(logAction.CONSUMING("product_created", ""), req)
+		c.Log.AddSummary(commonlog.EventTag{
+			Node:        "consuming",
+			Command:     "product_created",
+			Code:        "",
+			Description: "success",
+		})
+		c.Log.Flush()
+		return nil
+	})
+
+	app.Start()
 }

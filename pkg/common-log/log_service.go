@@ -21,11 +21,11 @@ type CustomLoggerService interface {
 	// getIsSetSummaryLogParameters() bool
 	// getSummaryLogParameters() SummaryParamsType
 	// setDependencyMetadata(metadata LogDependencyMetadata) CustomLoggerService
-	// getLogDto() LogDto
-	// update(key string, value any)
+	GetLogDto() LogDto
+	Update(key string, value any)
 	Info(log logAction.LoggerAction, data any, options ...masking.MaskingOptionDto)
 	Debug(log logAction.LoggerAction, data any, options ...masking.MaskingOptionDto)
-	Error(log logAction.LoggerAction, data any, stack interface{}, options ...masking.MaskingOptionDto)
+	Error(log logAction.LoggerAction, data, stack any, options ...masking.MaskingOptionDto)
 	SetSummaryLogErrorSource(param ErrorSourceType) CustomLoggerService
 	Flush()
 	AddSummary(params EventTag)
@@ -35,24 +35,39 @@ type CustomLoggerService interface {
 	// setDetailLogAdditionalInfo(key string, value any) CustomLoggerService
 }
 type customLoggerService struct {
-	logDto LogDto
-	// isSetSummaryLogParameters bool
-	summaryLogParameters     map[string]interface{}
-	additionalSummary        map[string]interface{}
+	logDto                    LogDto
+	isSetSummaryLogParameters bool
+	// summaryLogParameters     map[string]any
+	additionalSummary        map[string]any
 	summaryLogAdditionalInfo []Sequence
 
 	logger LoggerService
 	// utilService    LoggerHelperService
 	maskingService masking.MaskingService
+	utilService           *Timer
 }
 
 var maskingService = masking.NewMaskingService()
 
-func NewLogger(logger LoggerService) CustomLoggerService {
+type Timer struct {
+	now   int64   // Unix timestamp in milliseconds
+	begin float64 // High-resolution time in milliseconds
+}
+
+func NewTimer() *Timer {
+	return &Timer{
+		now:   time.Now().UnixNano() / int64(time.Millisecond),
+		begin: float64(time.Now().UnixNano()) / 1e6, // same units as JS performance.now()
+	}
+}
+
+func NewLogger(logger LoggerService, time *Timer) CustomLoggerService {
 	return &customLoggerService{
-		additionalSummary: make(map[string]interface{}),
-		logger:            logger,
-		maskingService:    *maskingService,
+		additionalSummary:         make(map[string]any),
+		logger:                    logger,
+		maskingService:            *maskingService,
+		isSetSummaryLogParameters: false,
+		utilService:                    time,
 	}
 }
 
@@ -68,6 +83,23 @@ func (c *customLoggerService) Init(data LogDto) {
 	}
 	hostName, _ := os.Hostname()
 	c.logDto.Instance = hostName
+}
+
+func (c *customLoggerService) GetLogDto() LogDto {
+	return c.logDto
+}
+
+func (c *customLoggerService) Update(key string, value any) {
+	v := reflect.ValueOf(&c.logDto).Elem()
+	field := v.FieldByName(key)
+	if field.IsValid() && field.CanSet() {
+		val := reflect.ValueOf(value)
+		if val.Type().AssignableTo(field.Type()) {
+			field.Set(val)
+		} else if val.Type().ConvertibleTo(field.Type()) {
+			field.Set(val.Convert(field.Type()))
+		}
+	}
 }
 
 func (c *customLoggerService) SetDependencyMetadata(metadata LogDependencyMetadata) CustomLoggerService {
@@ -89,7 +121,7 @@ func (c *customLoggerService) SetDependencyMetadata(metadata LogDependencyMetada
 	return c
 }
 
-func (c *customLoggerService) Info(action logAction.LoggerAction, data interface{}, options ...masking.MaskingOptionDto) {
+func (c *customLoggerService) Info(action logAction.LoggerAction, data any, options ...masking.MaskingOptionDto) {
 	cloned := cloneAndMask(data, options, c.maskingService)
 	c.logDto.Action = action.Action
 	c.logDto.ActionDescription = action.ActionDescription
@@ -107,7 +139,7 @@ func (c *customLoggerService) Info(action logAction.LoggerAction, data interface
 	c.logDto.SubAction = ""
 }
 
-func (c *customLoggerService) Debug(action logAction.LoggerAction, data interface{}, options ...masking.MaskingOptionDto) {
+func (c *customLoggerService) Debug(action logAction.LoggerAction, data any, options ...masking.MaskingOptionDto) {
 	cloned := cloneAndMask(data, options, c.maskingService)
 	c.logDto.Action = action.Action
 	c.logDto.ActionDescription = action.ActionDescription
@@ -118,7 +150,7 @@ func (c *customLoggerService) Debug(action logAction.LoggerAction, data interfac
 	c.logDto.SubAction = ""
 }
 
-func (c *customLoggerService) Error(action logAction.LoggerAction, data interface{}, stack interface{}, options ...masking.MaskingOptionDto) {
+func (c *customLoggerService) Error(action logAction.LoggerAction, data, stack any, options ...masking.MaskingOptionDto) {
 	cloned := cloneAndMask(data, options, c.maskingService)
 	c.logDto.Action = action.Action
 	c.logDto.ActionDescription = action.ActionDescription
@@ -130,8 +162,8 @@ func (c *customLoggerService) Error(action logAction.LoggerAction, data interfac
 }
 
 func (c *customLoggerService) SetSummaryLogErrorSource(param ErrorSourceType) CustomLoggerService {
-	c.additionalSummary = map[string]interface{}{
-		"errorSource": map[string]interface{}{
+	c.additionalSummary = map[string]any{
+		"errorSource": map[string]any{
 			"node":        param.Node,
 			"code":        param.Code,
 			"description": param.Description,
@@ -185,12 +217,12 @@ func (c *customLoggerService) Flush() {
 	c = nil
 }
 
-func isArrayOrSlice(data interface{}) bool {
+func isArrayOrSlice(data any) bool {
 	kind := reflect.TypeOf(data).Kind()
 	return kind == reflect.Slice || kind == reflect.Array
 }
 
-func cloneAndMask(data interface{}, options []masking.MaskingOptionDto, masker masking.MaskingService) interface{} {
+func cloneAndMask(data any, options []masking.MaskingOptionDto, masker masking.MaskingService) any {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return data
@@ -198,7 +230,7 @@ func cloneAndMask(data interface{}, options []masking.MaskingOptionDto, masker m
 
 	// check is array
 	if isArrayOrSlice(data) {
-		var clones []map[string]interface{}
+		var clones []map[string]any
 		if err := json.Unmarshal(raw, &clones); err != nil {
 			return data
 		}
@@ -221,7 +253,7 @@ func cloneAndMask(data interface{}, options []masking.MaskingOptionDto, masker m
 		return clones
 	}
 
-	var clone map[string]interface{}
+	var clone map[string]any
 	if err := json.Unmarshal(raw, &clone); err != nil {
 		return data
 	}
@@ -232,14 +264,12 @@ func cloneAndMask(data interface{}, options []masking.MaskingOptionDto, masker m
 			suffix := strings.Split(opt.MaskingField, "*")[1]
 			suffix = strings.TrimPrefix(suffix, ".")
 			lookupArr := GetObjectByStringKeys(clone, root)
-			if lookupArr != nil {
-				for _, item := range lookupArr {
-					elem, ok := item.(map[string]interface{})
-					if !ok {
-						continue
-					}
-					setNestedProperty(elem, suffix, opt.MaskingType, masker)
+			for _, item := range lookupArr {
+				elem, ok := item.(map[string]any)
+				if !ok {
+					continue
 				}
+				setNestedProperty(elem, suffix, opt.MaskingType, masker)
 			}
 			continue
 		}
@@ -249,13 +279,13 @@ func cloneAndMask(data interface{}, options []masking.MaskingOptionDto, masker m
 	return clone
 }
 
-func SetNestedArrayProperty(obj map[string]interface{}, path string, maskingType masking.MaskingType, masker masking.MaskingService) {
+func SetNestedArrayProperty(obj map[string]any, path string, maskingType masking.MaskingType, masker masking.MaskingService) {
 	keys := strings.Split(path, ".")
-	var current interface{} = obj
+	var current any = obj
 
 	for i := 0; i < len(keys)-1; i++ {
 		key := keys[i]
-		currentMap, ok := current.(map[string]interface{})
+		currentMap, ok := current.(map[string]any)
 		if !ok {
 			return
 		}
@@ -264,18 +294,18 @@ func SetNestedArrayProperty(obj map[string]interface{}, path string, maskingType
 
 	// Last key
 	lastKey := keys[len(keys)-1]
-	parentMap, ok := current.(map[string]interface{})
+	parentMap, ok := current.(map[string]any)
 	if !ok {
 		return
 	}
 
 	// Handle if parentMap[lastKey] is array of maps
-	arr, ok := parentMap[lastKey].([]interface{})
+	arr, ok := parentMap[lastKey].([]any)
 	if !ok {
 		return
 	}
 	for i, v := range arr {
-		elem, ok := v.(map[string]interface{})
+		elem, ok := v.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -286,14 +316,14 @@ func SetNestedArrayProperty(obj map[string]interface{}, path string, maskingType
 	parentMap[lastKey] = arr
 }
 
-func GetObjectByStringKeys(obj map[string]interface{}, path string) []interface{} {
+func GetObjectByStringKeys(obj map[string]any, path string) []any {
 	keys := strings.Split(path, ".")
-	current := interface{}(obj)
+	current := any(obj)
 	for _, key := range keys {
 		switch cur := current.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			current = cur[key]
-		case []interface{}:
+		case []any:
 			// If the key is an index in brackets e.g. [0], handle it here (optional)
 			return nil // or handle properly
 		default:
@@ -303,17 +333,17 @@ func GetObjectByStringKeys(obj map[string]interface{}, path string) []interface{
 			return nil
 		}
 	}
-	if arr, ok := current.([]interface{}); ok {
+	if arr, ok := current.([]any); ok {
 		return arr
 	}
 	return nil
 }
 
-func setNestedProperty(obj map[string]interface{}, path string, maskType masking.MaskingType, masker masking.MaskingService) {
+func setNestedProperty(obj map[string]any, path string, maskType masking.MaskingType, masker masking.MaskingService) {
 	keys := strings.Split(path, ".")
 	current := obj
 	for i := 0; i < len(keys)-1; i++ {
-		if next, ok := current[keys[i]].(map[string]interface{}); ok {
+		if next, ok := current[keys[i]].(map[string]any); ok {
 			current = next
 		} else {
 			return

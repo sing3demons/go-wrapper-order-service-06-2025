@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
-	"sync"
+	"syscall"
 	"time"
 
 	config "github.com/sing3demons/go-order-service/configs"
@@ -39,7 +41,7 @@ type IApplication interface {
 	Delete(pattern string, handler Handler)
 	Patch(pattern string, handler Handler)
 	Consumer(topic string, handler SubscribeFunc)
-	Start(ctx context.Context)
+	Start()
 	CreateTopic(topic string)
 }
 
@@ -149,13 +151,13 @@ func (a *App) CreateTopic(topic string) {
 	a.KafkaClient.CreateTopic(topic)
 }
 
-func (a *App) Consume(ctx context.Context, topic string) (*kafkaService.Message, error) {
-	msg, err := a.SubscriptionManager.Subscribe(ctx, topic)
-	if err != nil {
-		return nil, fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
-	}
-	return msg, nil
-}
+// func (a *App) Consume(ctx context.Context, topic string) (*kafkaService.Message, error) {
+// 	msg, err := a.SubscriptionManager.Subscribe(ctx, topic)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
+// 	}
+// 	return msg, nil
+// }
 
 func (a *App) GetSubscriber() kafkaService.Subscriber {
 	if a.KafkaClient == nil {
@@ -204,16 +206,16 @@ func (a *App) startSubscriptions(ctx context.Context) error {
 	return group.Wait()
 }
 
-func (a *App) Start(ctx context.Context) {
+func (a *App) Start() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	if a.conf.Server.AppPort == "" {
 		a.Logger.Error("server port is not configured")
 		return
 	}
 	a.Logger.Log("starting application on port: " + a.conf.Server.AppPort)
-	wg := sync.WaitGroup{}
 
-	// Start HTTP Server
-	wg.Add(1)
 	s := &http.Server{
 		Addr:           ":" + a.conf.Server.AppPort,
 		Handler:        a.httpServer,
@@ -222,39 +224,35 @@ func (a *App) Start(ctx context.Context) {
 		MaxHeaderBytes: 1 << 20,
 	}
 
+	// Start HTTP server
 	go func() {
-		defer wg.Done()
 		fmt.Println("server started at", s.Addr)
 		if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal("listen:", err)
 		}
 	}()
 
-	wg.Add(1)
+	// Start Subscriptions
 	go func() {
-		defer wg.Done()
-
-		err := a.startSubscriptions(ctx)
-		if err != nil {
-			a.Logger.Error("Subscription Error : %v", err)
+		if err := a.startSubscriptions(ctx); err != nil {
+			a.Logger.Error("Subscription Error: %v", err)
 		}
 	}()
 
-	wg.Wait()
-
+	// Wait for shutdown signal
 	<-ctx.Done()
 	a.Logger.Log("shutting down gracefully, press Ctrl+C again to force")
 
+	// Graceful HTTP server shutdown
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := s.Shutdown(timeoutCtx); err != nil {
-		fmt.Println(err)
+		fmt.Println("server shutdown error:", err)
 	}
 
-	defer func() {
-		if err := a.traceProvider.Shutdown(context.Background()); err != nil {
-			log.Fatalf("traceprovider: %v", err)
-		}
-	}()
+	// Shutdown tracing provider
+	if err := a.traceProvider.Shutdown(context.Background()); err != nil {
+		log.Fatalf("traceprovider: %v", err)
+	}
 }

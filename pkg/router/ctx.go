@@ -32,6 +32,10 @@ type Request interface {
 	Params(string) []string
 	SessionId() string
 	TransactionId() string
+	RequestId() string
+	Headers() map[string]any
+	Method() string
+	URL() string
 }
 
 func (c *Context) Bind(i any) error {
@@ -39,7 +43,9 @@ func (c *Context) Bind(i any) error {
 }
 
 func newContext(w http.ResponseWriter, r Request, k kafkaService.KafkaClient, logger commonlog.LoggerService, conf *config.Config) *Context {
-	return &Context{
+	t := commonlog.NewTimer()
+	kpLog := commonlog.NewLogger(logger, t)
+	ctx := &Context{
 		Context:        r.Context(),
 		Request:        r,
 		ResponseWriter: w,
@@ -47,44 +53,83 @@ func newContext(w http.ResponseWriter, r Request, k kafkaService.KafkaClient, lo
 		Logger:         logger,
 		conf:           conf,
 	}
-}
 
-func (c *Context) CommonLog() commonlog.CustomLoggerService {
-	kpLog := commonlog.NewLogger(c.Logger)
+	broker := "none"
+	if w == nil {
+		broker = r.HostName()
+	}
+
 	kpLog.Init(commonlog.LogDto{
-		TransactionId:    c.Request.TransactionId(),
-		SessionId:        c.Request.SessionId(),
-		AppName:          c.conf.App.Name,
-		ComponentVersion: c.conf.App.Version,
-		ComponentName:    c.conf.App.ComponentName,
-		Instance:         c.Request.HostName(),
-		DateTime:         time.Now().Format(time.RFC3339),
+		Channel:          "none",
+		UseCase:          "none",
+		UseCaseStep:      "none",
+		Broker:           broker,
+		TransactionId:    ctx.Request.TransactionId(),
+		SessionId:        ctx.Request.SessionId(),
+		RequestId:        ctx.Request.RequestId(),
+		AppName:          conf.App.Name,
+		ComponentVersion: conf.App.Version,
+		ComponentName:    conf.App.ComponentName,
+		Instance:         ctx.Request.HostName(),
+		// DateTime:         time.Now().Format(time.RFC3339),
+		OriginateServiceName: func() string {
+			if w != nil {
+				return "HTTP Service"
+			}
+			return "Event Source"
+		}(),
+		RecordType: "detail",
 	})
 
-	c.Log = kpLog
+	ctx.Log = kpLog
+	return ctx
+}
 
-	return kpLog
+type Header struct {
+	Broker      string
+	Channel     string
+	UseCase     string
+	UseCaseStep string
+	Identity    struct {
+		Device interface{}
+		Public string
+		User   string
+	}
+	Session     string
+	Transaction string
+}
+type KafkaPayload struct {
+	Header Header      `json:"header"`
+	Body   interface{} `json:"body"`
 }
 
 func (c *Context) Publish(ctx *Context, topic string, message any) error {
 	var msg []byte
 	start := time.Now()
 
+	body := KafkaPayload{
+		Body: message,
+	}
+	body.Header.Broker = c.conf.Kafka.Broker
+	body.Header.UseCase = topic
+	body.Header.Session = ctx.Request.SessionId()
+	body.Header.Transaction = ctx.Request.TransactionId()
+	body.Header.Channel = topic
+	body.Header.UseCaseStep = "publish"
+	body.Header.Identity.Device = ctx.Request.HostName()
+	body.Header.Identity.User = ctx.Request.HostName()
+
 	ctx.Log.Info(logAction.PRODUCING(topic, ""), map[string]any{
 		"body": map[string]any{
 			"topic": topic,
-			"value": message,
+			"value": body,
 		}})
 
-	if _, ok := message.([]byte); ok {
-		msg = message.([]byte)
-	} else {
-		var err error
-		msg, err = json.Marshal(message)
-		if err != nil {
-			c.Logger.Errorf("failed to marshal message: %v", err)
-			return err
-		}
+	var err error
+	msg, err = json.Marshal(body)
+	if err != nil {
+		c.Logger.Errorf("failed to marshal message: %v", err)
+		return err
 	}
 	description := "success"
 
@@ -113,6 +158,8 @@ func (c *Context) JSON(code int, v any) error {
 		c.Logger.Errorf("failed to write response: %v", err)
 		return err
 	}
+	c.Log.Info(logAction.OUTBOUND("client", ""), v)
+	c.Log.Flush()
 	return nil
 }
 

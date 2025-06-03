@@ -77,6 +77,36 @@ func (r *Request) Header(key string) string {
 	return r.req.Header.Get(key)
 }
 
+func (r *Request) Headers() map[string]any {
+	headers := make(map[string]any)
+	for key, values := range r.req.Header {
+		if len(values) > 0 {
+			headers[key] = values[0]
+		} else {
+			headers[key] = nil
+		}
+	}
+	return headers
+}
+
+func (r *Request) Method() string {
+	return r.req.Method
+}
+
+func (r *Request) URL() string {
+	if r.req.URL == nil {
+		return ""
+	}
+
+	url := r.req.URL.String()
+	if r.req.URL.RawQuery != "" {
+		url += "?" + r.req.URL.RawQuery
+	}
+
+	return url
+}
+
+
 // PathParam retrieves a path parameter from the request.
 func (r *Request) PathParam(key string) string {
 	return r.pathParams[key]
@@ -230,4 +260,14 @@ func (r *Request) TransactionId() string {
 	}
 
 	return transactionId
+}
+
+func (r *Request) RequestId() string {
+	requestId := r.req.Header.Get("X-Request-Id")
+	if requestId == "" {
+		requestId = uuid.New().String()
+		r.req.Header.Set("X-Request-Id", requestId)
+	}
+
+	return requestId
 }

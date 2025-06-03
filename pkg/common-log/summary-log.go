@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/sing3demons/go-order-service/pkg/common-log/LogSeverity"
 	"github.com/sing3demons/go-order-service/pkg/common-log/masking"
 	"go.uber.org/zap"
 )
@@ -57,13 +58,9 @@ func (s *summaryLogService) Update(key string, value any) {
 func (s *summaryLogService) Flush() {
 	s.Init(s.customLogger.logDto)
 	s.logDto.RecordType = "Summary"
-	s.logDto.DateTime = s.customLogger.logDto.DateTime
-	startTime, err := time.Parse(time.RFC3339, s.customLogger.logDto.DateTime)
-	if err == nil {
-		s.logDto.ServiceTime = time.Since(startTime).Milliseconds() / 1000
-	} else {
-		s.logDto.ServiceTime = 0
-	}
+	s.logDto.DateTime = time.Unix(s.customLogger.utilService.now, 0).Format(time.RFC3339)
+	startTime := time.Unix(int64(s.customLogger.utilService.begin), 0)
+	s.logDto.ServiceTime = time.Since(startTime).Milliseconds() / 1000
 
 	if s.customLogger.additionalSummary != nil {
 		s.logDto.AdditionalInfo = s.customLogger.additionalSummary
@@ -85,7 +82,7 @@ func (s *summaryLogService) Flush() {
 	if s.customLogger.logDto.Severity != "" {
 		s.logDto.Severity = s.customLogger.logDto.Severity
 	} else {
-		s.logDto.Severity = "NOTICE"
+		s.logDto.Severity = LogSeverity.NORMAL
 	}
 
 	if s.customLogger.logDto.AppResult != "" {
@@ -116,19 +113,57 @@ func (s *summaryLogService) Flush() {
 	s.logger.Info(info)
 }
 
-func (s *summaryLogService) FlushError(data any) {
+type Stack struct {
+	Status     string `json:"status,omitempty"`
+	ResultType string `json:"resultType,omitempty"`
+	Severity   string `json:"severity,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Code       string `json:"code,omitempty"`
+}
+
+func (s *summaryLogService) FlushError(data Stack) {
+	s.Init(s.customLogger.logDto)
 	s.logDto.RecordType = "Summary"
-	s.logDto.DateTime = s.customLogger.logDto.DateTime
-	startTime, err := time.Parse(time.RFC3339, s.customLogger.logDto.DateTime)
-	if err == nil {
-		s.logDto.ServiceTime = time.Since(startTime).Milliseconds() / 1000
-	} else {
-		s.logDto.ServiceTime = 0
-	}
+	s.logDto.DateTime = time.Unix(s.customLogger.utilService.now, 0).Format(time.RFC3339)
+	startTime := time.Unix(int64(s.customLogger.utilService.begin), 0)
+	s.logDto.ServiceTime = time.Since(startTime).Milliseconds() / 1000
 
 	if s.customLogger.additionalSummary != nil {
 		s.logDto.AdditionalInfo = s.customLogger.additionalSummary
 		s.customLogger.additionalSummary = nil
+	}
+
+	if data.Status != "" {
+		s.logDto.AppResultHttpStatus = data.Status
+	} else {
+		s.logDto.AppResultHttpStatus = "200"
+	}
+
+	if data.ResultType != "" {
+		s.logDto.AppResultType = data.ResultType
+	} else {
+		s.logDto.AppResultType = "SYSTEM_ERROR"
+	}
+
+	if data.Severity != "" {
+		s.logDto.Severity = data.Severity
+	} else {
+		s.logDto.Severity = LogSeverity.NOTICE
+	}
+
+	if data.Message != "" {
+		s.logDto.AppResult = data.Message
+	}
+
+	if data.Code != "" {
+		s.logDto.AppResultCode = data.Code
+	} else {
+		s.logDto.AppResultCode = "50000"
+	}
+
+	if len(s.customLogger.summaryLogAdditionalInfo) > 0 {
+		s.logDto.Sequences = append(s.logDto.Sequences, s.customLogger.summaryLogAdditionalInfo...)
+		s.customLogger.summaryLogAdditionalInfo = nil
 	}
 
 	s.clearNonSummaryLogParam()

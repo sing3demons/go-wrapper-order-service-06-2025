@@ -7,11 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 	config "github.com/sing3demons/go-order-service/configs"
+	commonlog "github.com/sing3demons/go-order-service/pkg/common-log"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -47,7 +46,7 @@ type kafkaClient struct {
 
 	mu *sync.RWMutex
 
-	logger Logger
+	logger commonlog.LoggerService
 	config config.KafkaConfig
 }
 
@@ -61,7 +60,7 @@ type KafkaClient interface {
 	CreateTopic(name string) error
 }
 
-func New(conf *config.KafkaConfig, logger Logger) KafkaClient {
+func New(conf *config.KafkaConfig, logger commonlog.LoggerService) KafkaClient {
 	err := validateConfigs(conf)
 	if err != nil {
 		logger.Errorf("could not initialize kafka, error: %v", err)
@@ -126,8 +125,6 @@ func validateRequiredFields(conf *config.KafkaConfig) error {
 }
 
 func (k *kafkaClient) Publish(ctx context.Context, topic string, message []byte) error {
-	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID().String()
-	fmt.Printf("Trace ID: %s from kafka\n", traceID)
 	ctx, span := otel.GetTracerProvider().Tracer("gokp").Start(ctx, "kafka-publish")
 	defer span.End()
 
@@ -135,7 +132,7 @@ func (k *kafkaClient) Publish(ctx context.Context, topic string, message []byte)
 		return errPublisherNotConfigured
 	}
 
-	start := time.Now()
+	// start := time.Now()
 	err := k.writer.WriteMessages(ctx,
 		kafka.Message{
 			Topic: topic,
@@ -143,26 +140,63 @@ func (k *kafkaClient) Publish(ctx context.Context, topic string, message []byte)
 			Time:  time.Now(),
 		},
 	)
-	end := time.Since(start)
+	// end := time.Since(start)
 
 	if err != nil {
 		k.logger.Errorf("failed to publish message to kafka broker, error: %v", err)
 		return err
 	}
 
-	k.logger.Debug(&Log{
-		Mode:          "PUB",
-		CorrelationID: span.SpanContext().TraceID().String(),
-		MessageValue:  string(message),
-		Topic:         topic,
-		Host:          k.config.Broker,
-		PubSubBackend: "KAFKA",
-		Time:          end.Microseconds(),
-	})
+	// k.logger.Debug(&Log{
+	// 	Mode:          "PUB",
+	// 	CorrelationID: span.SpanContext().TraceID().String(),
+	// 	MessageValue:  string(message),
+	// 	Topic:         topic,
+	// 	Host:          k.config.Broker,
+	// 	PubSubBackend: "KAFKA",
+	// 	Time:          end.Microseconds(),
+	// })
 
 	// k.metrics.IncrementCounter(ctx, "app_pubsub_publish_success_count", "topic", topic)
 
 	return nil
+}
+
+const (
+	sessionId     = "x-session-id"
+	requestId     = "x-request-id"
+	transactionId = "x-transaction-id"
+)
+
+type Header struct {
+	Broker      string
+	Channel     string
+	UseCase     string
+	UseCaseStep string
+	Identity    struct {
+		Device interface{}
+		Public string
+		User   string
+	}
+	Session     string
+	Transaction string
+}
+
+type DataConsumer struct {
+	Header struct {
+		Broker      string
+		Channel     string
+		UseCase     string
+		UseCaseStep string
+		Identity    struct {
+			Device interface{}
+			Public string
+			User   string
+		}
+		Session     string
+		Transaction string
+	}
+	Body interface{}
 }
 
 func (k *kafkaClient) Subscribe(ctx context.Context, topic string) (*Message, error) {
@@ -198,41 +232,33 @@ func (k *kafkaClient) Subscribe(ctx context.Context, topic string) (*Message, er
 	// Release the lock on the reader map after update
 	k.mu.Unlock()
 
-	start := time.Now()
+	// start := time.Now()
 
 	// Read a single message from the topic
 	reader = k.reader[topic]
 	msg, err := reader.FetchMessage(ctx)
-
 	if err != nil {
 		k.logger.Errorf("failed to read message from kafka topic %s: %v", topic, err)
 
 		return nil, err
 	}
 
-	session := ctx.Value("x-session-id")
-	if session == nil {
-		// set context with session if not already set
-		ctx = context.WithValue(ctx, "x-session-id", uuid.NewString())
-
-	}
-
-	m := NewMessage(ctx)
+	m := NewMessage(ctx, k.config, msg.Value)
 	m.Value = msg.Value
 	m.Topic = topic
-	m.Committer = newKafkaMessage(&msg, k.reader[topic], k.logger)
+	m.Committer = newKafkaMessage(&msg, k.reader[topic])
 
-	end := time.Since(start)
+	// end := time.Since(start)
 
-	k.logger.Debug(&Log{
-		Mode:          "SUB",
-		CorrelationID: span.SpanContext().TraceID().String(),
-		MessageValue:  string(msg.Value),
-		Topic:         topic,
-		Host:          k.config.Broker,
-		PubSubBackend: "KAFKA",
-		Time:          end.Microseconds(),
-	})
+	// k.logger.Debug(&Log{
+	// 	Mode:          "SUB",
+	// 	CorrelationID: span.SpanContext().TraceID().String(),
+	// 	MessageValue:  string(msg.Value),
+	// 	Topic:         topic,
+	// 	Host:          k.config.Broker,
+	// 	PubSubBackend: "KAFKA",
+	// 	Time:          end.Microseconds(),
+	// })
 
 	// k.metrics.IncrementCounter(ctx, "app_pubsub_subscribe_success_count", "topic", topic, "consumer_group", k.config.ConsumerGroupID)
 
@@ -255,7 +281,7 @@ func (k *kafkaClient) Close() (err error) {
 	return err
 }
 
-func initializeKafkaClient(conf *config.KafkaConfig, logger Logger) (*kafka.Dialer, Connection, Writer, map[string]Reader, error) {
+func initializeKafkaClient(conf *config.KafkaConfig, logger commonlog.LoggerService) (*kafka.Dialer, Connection, Writer, map[string]Reader, error) {
 	dialer := &kafka.Dialer{
 		Timeout:   10 * time.Second,
 		DualStack: true,
@@ -327,7 +353,7 @@ func (k *kafkaClient) CreateTopic(name string) error {
 }
 
 // retryConnect handles the retry mechanism for connecting to the Kafka broker.
-func retryConnect(client *kafkaClient, conf *config.KafkaConfig, logger Logger) {
+func retryConnect(client *kafkaClient, conf *config.KafkaConfig, logger commonlog.LoggerService) {
 	for {
 		time.Sleep(defaultRetryTimeout)
 

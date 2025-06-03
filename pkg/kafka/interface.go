@@ -28,14 +28,14 @@ type Committer interface {
 	Commit()
 }
 
-type Logger interface {
-	Debugf(format string, args ...any)
-	Debug(args ...any)
-	Logf(format string, args ...any)
-	Log(args string)
-	Errorf(format string, args ...any)
-	Error(args ...any)
-}
+// type Logger interface {
+// 	Debugf(format string, args ...any)
+// 	Debug(args ...any)
+// 	Logf(format string, args ...any)
+// 	Log(args string)
+// 	Errorf(format string, args ...any)
+// 	Error(args ...any)
+// }
 
 type Reader interface {
 	ReadMessage(ctx context.Context) (kafka.Message, error)
