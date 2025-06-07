@@ -24,6 +24,7 @@ type LogConfig struct {
 }
 
 type Log struct {
+	App     LogConfig `json:"app" yaml:"app"`
 	Detail  LogConfig `json:"detail" yaml:"detail"`
 	Summary LogConfig `json:"summary" yaml:"summary"`
 }

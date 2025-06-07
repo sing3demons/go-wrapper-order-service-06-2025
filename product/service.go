@@ -32,8 +32,11 @@ func (s *productService) CreateProduct(ctx *router.Context, body *ProductInfo) e
 	body.CreatedAt = start
 	body.UpdatedAt = start
 	body.DeletedAt = nil
-	productId, _ := uuid.NewV7()
-	body.ProductId = productId.String()
+
+	if body.ProductId == "" {
+		productId, _ := uuid.NewV7()
+		body.ProductId = productId.String()
+	}
 
 	processReqLog := ProcessMongoReq{
 		Collection: "products",
@@ -45,7 +48,7 @@ func (s *productService) CreateProduct(ctx *router.Context, body *ProductInfo) e
 
 	ctx.Log.SetDependencyMetadata(commonlog.LogDependencyMetadata{
 		Dependency: dependency,
-	}).Info(logAction.DB_REQUEST(cmd, ""),
+	}).Info(logAction.DB_REQUEST(logAction.DB_CREATE, cmd),
 		map[string]any{
 			"Body": processReqLog,
 		})
@@ -59,32 +62,29 @@ func (s *productService) CreateProduct(ctx *router.Context, body *ProductInfo) e
 	end := time.Since(start)
 
 	if err != nil {
-		ctx.Log.Error(logAction.DB_RESPONSE(cmd, ""), "", err)
-		ctx.Log.AddSummary(commonlog.EventTag{
+		ctx.Log.SetSummary(commonlog.LogEventTag{
 			Node:        "mongo",
 			Command:     cmd,
 			Code:        "500",
 			Description: err.Error(),
 			ResTime:     end.Microseconds(),
-		})
+		}).Error(logAction.DB_RESPONSE(logAction.DB_CREATE, cmd), err.Error())
 
 		return fmt.Errorf("failed to create product: %w", err)
 	}
 
-	ctx.Log.SetDependencyMetadata(commonlog.LogDependencyMetadata{
-		Dependency:   dependency,
-		ResponseTime: end.Microseconds(),
-		ResultCode:   "200",
-	}).Info(logAction.DB_RESPONSE(cmd, ""), map[string]any{
-		"Body": result,
-	})
-	
-	ctx.Log.AddSummary(commonlog.EventTag{
+	ctx.Log.SetSummary(commonlog.LogEventTag{
 		Node:        "mongo",
 		Command:     cmd,
 		Code:        "200",
 		Description: "success",
 		ResTime:     end.Microseconds(),
+	}).SetDependencyMetadata(commonlog.LogDependencyMetadata{
+		Dependency:   dependency,
+		ResponseTime: end.Microseconds(),
+		ResultCode:   "200",
+	}).Info(logAction.DB_RESPONSE(logAction.DB_CREATE, cmd), map[string]any{
+		"Body": result,
 	})
 
 	// Implementation for creating a product

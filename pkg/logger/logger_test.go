@@ -11,7 +11,7 @@ import (
 func TestNewLogger(t *testing.T) {
 	os.Setenv("MODE", "test")
 	defer os.Unsetenv("MODE")
-	log := logger.NewLogger(&config.Config{})
+	log := logger.NewLogger(config.LogConfig{})
 
 	// These won't panic but print to stderr (zap)
 	log.Debug("debug message")

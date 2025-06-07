@@ -31,6 +31,8 @@ type App struct {
 	httpServer    *httpService.Router
 	traceProvider *trace.TracerProvider
 	Logger        commonlog.LoggerService
+	DetailLog     commonlog.LoggerService
+	SummaryLog    commonlog.LoggerService
 	conf          *config.Config
 }
 
@@ -43,9 +45,16 @@ type IApplication interface {
 	Consumer(topic string, handler SubscribeFunc)
 	Start()
 	CreateTopic(topic string)
+
+	StartKafka()
+
+	LogDetail(logger commonlog.LoggerService)
+	LogSummary(logger commonlog.LoggerService)
 }
 
 func NewApplication(conf *config.Config, logger commonlog.LoggerService) IApplication {
+	defaultLog := commonlog.NewDefaultLoggerService()
+
 	var traceProvider *trace.TracerProvider
 	if conf.TracerHost != "" {
 		tp, err := startTracing(conf.App.Name, conf.TracerHost)
@@ -61,7 +70,10 @@ func NewApplication(conf *config.Config, logger commonlog.LoggerService) IApplic
 		conf:   conf,
 	}
 
-	kafkaClient := kafkaService.New(&conf.Kafka, logger)
+	app.DetailLog = defaultLog
+	app.SummaryLog = defaultLog
+
+	// kafkaClient := kafkaService.New(&conf.Kafka, logger)
 	httpServiceClient := httpService.NewRouter()
 	app.httpServer = httpServiceClient
 	if traceProvider != nil {
@@ -77,10 +89,40 @@ func NewApplication(conf *config.Config, logger commonlog.LoggerService) IApplic
 			})
 		})
 	}
-	if kafkaClient != nil {
-		app.SubscriptionManager = newSubscriptionManager(kafkaClient, logger, conf)
-	}
+	// if kafkaClient != nil {
+	// 	app.KafkaClient = kafkaClient
+	// 	app.SubscriptionManager = newSubscriptionManager(kafkaClient, LogService{
+	// 		appLog:     logger,
+	// 		detailLog:  app.DetailLog,
+	// 		summaryLog: app.SummaryLog,
+	// 	}, conf)
+	// }
 	return app
+}
+
+func (a *App) StartKafka() {
+	if a.conf.Kafka.Broker == "" {
+		a.Logger.Error("Kafka broker is not configured")
+		return
+	}
+
+	a.KafkaClient = kafkaService.New(&a.conf.Kafka, a.Logger)
+	a.SubscriptionManager = newSubscriptionManager(a.KafkaClient, LogService{
+		appLog:     a.Logger,
+		detailLog:  a.DetailLog,
+		summaryLog: a.SummaryLog,
+	}, a.conf)
+
+	a.Logger.Log("Kafka client initialized successfully")
+
+}
+
+func (a *App) LogDetail(logger commonlog.LoggerService) {
+	a.DetailLog = logger
+}
+
+func (a *App) LogSummary(logger commonlog.LoggerService) {
+	a.SummaryLog = logger
 }
 
 func (a *App) add(method, pattern string, h Handler) {
@@ -88,7 +130,9 @@ func (a *App) add(method, pattern string, h Handler) {
 		function:       h,
 		requestTimeout: time.Duration(10) * time.Second,
 		KafkaClient:    a.SubscriptionManager.KafkaClient,
-		Logger:         a.Logger,
+		AppLog:         a.Logger,
+		DetailLog:      a.DetailLog,
+		SummaryLog:     a.SummaryLog,
 		conf:           a.conf,
 	})
 }
@@ -161,12 +205,22 @@ func (a *App) CreateTopic(topic string) {
 
 func (a *App) GetSubscriber() kafkaService.Subscriber {
 	if a.KafkaClient == nil {
+		fmt.Println("Kafka client is not initialized, creating a new one")
+		if a.conf.Kafka.Broker != "" {
+			a.KafkaClient = kafkaService.New(&a.conf.Kafka, a.Logger)
+			a.SubscriptionManager = newSubscriptionManager(a.KafkaClient, LogService{
+				appLog:     a.Logger,
+				detailLog:  a.DetailLog,
+				summaryLog: a.SummaryLog,
+			}, a.conf)
+		}
 		return nil
 	}
 
 	return a.KafkaClient
 }
 func (a *App) Consumer(topic string, handler SubscribeFunc) {
+	fmt.Println("Adding consumer for topic:", topic)
 	if topic == "" || handler == nil {
 		a.Logger.Error("invalid subscription: topic and handler must not be empty or nil")
 		return
@@ -189,6 +243,7 @@ func (a *App) Consumer(topic string, handler SubscribeFunc) {
 }
 
 func (a *App) startSubscriptions(ctx context.Context) error {
+	fmt.Println("Starting subscriptions...")
 	if len(a.SubscriptionManager.subscriptions) == 0 {
 		return nil
 	}
@@ -210,27 +265,24 @@ func (a *App) Start() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if a.conf.Server.AppPort == "" {
-		a.Logger.Error("server port is not configured")
-		return
-	}
-	a.Logger.Log("starting application on port: " + a.conf.Server.AppPort)
+	s := &http.Server{}
 
-	s := &http.Server{
-		Addr:           ":" + a.conf.Server.AppPort,
-		Handler:        a.httpServer,
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
-		MaxHeaderBytes: 1 << 20,
-	}
+	if a.conf.Server.AppPort != "" {
+		a.Logger.Log("starting application on port: " + a.conf.Server.AppPort)
 
-	// Start HTTP server
-	go func() {
-		fmt.Println("server started at", s.Addr)
-		if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal("listen:", err)
-		}
-	}()
+		s.Addr = ":" + a.conf.Server.AppPort
+		s.Handler = a.httpServer
+		s.ReadTimeout = 10 * time.Second
+		s.WriteTimeout = 10 * time.Second
+		s.MaxHeaderBytes = 1 << 20 // 1 MB
+
+		// Start HTTP server
+		go func() {
+			if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatal("listen:", err)
+			}
+		}()
+	}
 
 	// Start Subscriptions
 	go func() {

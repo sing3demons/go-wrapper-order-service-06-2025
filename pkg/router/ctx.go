@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"runtime/debug"
 	"time"
@@ -42,16 +43,22 @@ func (c *Context) Bind(i any) error {
 	return c.Request.Bind(i)
 }
 
-func newContext(w http.ResponseWriter, r Request, k kafkaService.KafkaClient, logger commonlog.LoggerService, conf *config.Config) *Context {
+type LogService struct {
+	appLog     commonlog.LoggerService
+	detailLog  commonlog.LoggerService
+	summaryLog commonlog.LoggerService
+}
+
+func newContext(w http.ResponseWriter, r Request, k kafkaService.KafkaClient, logger LogService, conf *config.Config) *Context {
 	t := commonlog.NewTimer()
-	kpLog := commonlog.NewLogger(logger, t)
+	kpLog := commonlog.NewLogger(logger.detailLog, logger.summaryLog, t)
 	ctx := &Context{
 		Context:        r.Context(),
 		Request:        r,
 		ResponseWriter: w,
 		KafkaClient:    k,
-		Logger:         logger,
 		conf:           conf,
+		Logger:         logger.appLog,
 	}
 
 	broker := "none"
@@ -138,28 +145,31 @@ func (c *Context) Publish(ctx *Context, topic string, message any) error {
 		c.Logger.Errorf("failed to publish message to topic %s: %v", topic, err)
 	}
 	end := time.Since(start)
-	c.Log.Info(logAction.PRODUCED(topic, ""), description)
-	c.Log.AddSummary(commonlog.EventTag{
+	c.Log.SetSummary(commonlog.LogEventTag{
 		Node:        "kafka",
 		Command:     topic,
 		Code:        "200",
 		Description: description,
 		ResTime:     end.Microseconds(),
-	})
+	}).Info(logAction.PRODUCED(topic, ""), description)
 
 	return nil
 }
 
 func (c *Context) JSON(code int, v any) error {
-	c.ResponseWriter.Header().Set("Content-Type", "application/json; charset=UTF8")
-	c.ResponseWriter.WriteHeader(code)
+	if c.ResponseWriter != nil {
+		c.ResponseWriter.Header().Set("Content-Type", "application/json; charset=UTF8")
+		c.ResponseWriter.WriteHeader(code)
 
-	if err := json.NewEncoder(c.ResponseWriter).Encode(v); err != nil {
-		c.Logger.Errorf("failed to write response: %v", err)
-		return err
+		if err := json.NewEncoder(c.ResponseWriter).Encode(v); err != nil {
+			c.Log.Error(logAction.OUTBOUND("client", ""), err.Error())
+			c.Log.End(code, err.Error())
+			return err
+		}
+		c.Log.Info(logAction.OUTBOUND("client", ""), v)
 	}
-	c.Log.Info(logAction.OUTBOUND("client", ""), v)
-	c.Log.Flush()
+
+	c.Log.End(code, "")
 	return nil
 }
 
@@ -168,11 +178,11 @@ type SubscribeFunc func(c *Context) error
 type SubscriptionManager struct {
 	kafkaService.KafkaClient
 	subscriptions map[string]SubscribeFunc
-	Logger        commonlog.LoggerService
+	Logger        LogService
 	conf          *config.Config
 }
 
-func newSubscriptionManager(kafkaSvc kafkaService.KafkaClient, logger commonlog.LoggerService, conf *config.Config) SubscriptionManager {
+func newSubscriptionManager(kafkaSvc kafkaService.KafkaClient, logger LogService, conf *config.Config) SubscriptionManager {
 	return SubscriptionManager{
 		KafkaClient:   kafkaSvc,
 		subscriptions: make(map[string]SubscribeFunc),
@@ -186,12 +196,12 @@ func (s *SubscriptionManager) startSubscriber(ctx context.Context, topic string,
 	for {
 		select {
 		case <-ctx.Done():
-			s.Logger.Logf("shutting down subscriber for topic %s", topic)
+			s.Logger.appLog.Logf("shutting down subscriber for topic %s", topic)
 			return nil
 		default:
 			err := s.handleSubscription(ctx, topic, handler)
 			if err != nil {
-				s.Logger.Errorf("error in subscription for topic %s: %v", topic, err)
+				s.Logger.appLog.Errorf("error in subscription for topic %s: %v", topic, err)
 			}
 		}
 	}
@@ -201,7 +211,7 @@ func (s *SubscriptionManager) handleSubscription(ctx context.Context, topic stri
 	msg, err := s.KafkaClient.Subscribe(ctx, topic)
 
 	if err != nil {
-		s.Logger.Errorf("error while reading from topic %v, err: %v", topic, err.Error())
+		s.Logger.appLog.Errorf("error while reading from topic %v, err: %v", topic, err.Error())
 		return err
 	}
 
@@ -210,7 +220,12 @@ func (s *SubscriptionManager) handleSubscription(ctx context.Context, topic stri
 	}
 
 	// newContext creates a new context from the msg.Context()
-	msgCtx := newContext(nil, msg, s.KafkaClient, s.Logger, s.conf)
+	logService := LogService{
+		appLog:     s.Logger.appLog,
+		detailLog:  s.Logger.detailLog,
+		summaryLog: s.Logger.summaryLog,
+	}
+	msgCtx := newContext(nil, msg, s.KafkaClient, logService, s.conf)
 	err = func(ctx *Context) error {
 		defer func() {
 			panicRecovery(recover(), ctx.Logger)
@@ -221,7 +236,7 @@ func (s *SubscriptionManager) handleSubscription(ctx context.Context, topic stri
 
 	if err != nil {
 		// fmt.Printf("error in handler for topic %s: %v", topic, err)
-		s.Logger.Errorf("error in handler for topic %s: %v", topic, err)
+		s.Logger.appLog.Errorf("error in handler for topic %s: %v", topic, err)
 
 		return nil
 	}
@@ -254,7 +269,12 @@ func panicRecovery(re any, log commonlog.LoggerService) {
 		e = "Unknown panic type"
 	}
 
-	log.Error(panicLog{
+	// log.Error(panicLog{
+	// 	Error:      e,
+	// 	StackTrace: string(debug.Stack()),
+	// })
+
+	fmt.Println(panicLog{
 		Error:      e,
 		StackTrace: string(debug.Stack()),
 	})

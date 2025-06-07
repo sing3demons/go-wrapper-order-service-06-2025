@@ -24,12 +24,10 @@ type ILogger interface {
 	Errorf(format string, args ...any)
 	Error(args ...any)
 	Sync() error
-	SummaryLog() *zap.Logger
 }
 
 type zLogger struct {
 	*zap.Logger
-	summaryLogger *zap.Logger
 }
 
 func (k *zLogger) Debugf(format string, args ...any) {
@@ -58,33 +56,27 @@ func (k *zLogger) Error(args ...any) {
 	k.Logger.Sugar().Error(args...)
 }
 
-func NewLogger(cfg *config.Config) ILogger {
-	logger, err := BuildZapLogger(cfg.Log.Detail, true)
+func NewLogger(cfg config.LogConfig) ILogger {
+	logger, err := BuildZapLogger(cfg, true)
 	if err != nil {
 		log.Fatalf("failed to build detail logger: %v", err)
 	}
 
-	summaryLogger, err := BuildZapLogger(cfg.Log.Summary, true)
-	if err != nil {
-		log.Fatalf("failed to build summary logger: %v", err)
-	}
+	// _, err = BuildZapLogger(cfg.Log.Summary, true)
+	// if err != nil {
+	// 	log.Fatalf("failed to build summary logger: %v", err)
+	// }
 
 	if os.Getenv("MODE") == "test" {
 		logger = zap.NewNop()
 	}
-	customLog := &zLogger{Logger: logger,
-		summaryLogger: summaryLogger,
-	}
+	customLog := &zLogger{Logger: logger}
 
 	return customLog
 }
 
 func (k *zLogger) Sync() error {
 	return k.Logger.Sync()
-}
-
-func (k *zLogger) SummaryLog() *zap.Logger {
-	return k.summaryLogger
 }
 
 // formatFilename replaces %DATE% with the actual date using the pattern

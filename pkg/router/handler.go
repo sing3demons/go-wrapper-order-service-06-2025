@@ -38,8 +38,12 @@ type handler struct {
 	function       Handler
 	requestTimeout time.Duration
 	kafkaService.KafkaClient
-	Logger commonlog.LoggerService
-	conf   *config.Config
+
+	AppLog     commonlog.LoggerService
+	DetailLog  commonlog.LoggerService
+	SummaryLog commonlog.LoggerService
+
+	conf *config.Config
 }
 
 type ErrorLogEntry struct {
@@ -52,7 +56,12 @@ func (el *ErrorLogEntry) PrettyPrint(writer io.Writer) {
 }
 
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	c := newContext(w, gokpHTTP.NewRequest(r), h.KafkaClient, h.Logger, h.conf)
+	logService := LogService{
+		appLog:     h.AppLog,
+		detailLog:  h.DetailLog,
+		summaryLog: h.SummaryLog,
+	}
+	c := newContext(w, gokpHTTP.NewRequest(r), h.KafkaClient, logService, h.conf)
 	traceID := trace.SpanFromContext(r.Context()).SpanContext().TraceID().String()
 
 	if websocket.IsWebSocketUpgrade(r) {

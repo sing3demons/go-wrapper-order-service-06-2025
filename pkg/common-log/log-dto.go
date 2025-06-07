@@ -1,6 +1,10 @@
 package commonlog
 
-import "go.uber.org/zap"
+import (
+	"fmt"
+	"log/slog"
+	"os"
+)
 
 // ErrorSourceType represents the source of an error.
 type ErrorSourceType struct {
@@ -20,7 +24,7 @@ type Sequence struct {
 	Result  []SequenceResult `json:"Result"`
 }
 
-type EventTag struct {
+type LogEventTag struct {
 	Node        string
 	Command     string
 	Code        string
@@ -46,6 +50,7 @@ type LogDto struct {
 	SubAction            string      `json:"subAction,omitempty"`
 	ActionDescription    string      `json:"actionDescription,omitempty"`
 	Message              string      `json:"message,omitempty"`
+	Messages             string      `json:"messages,omitempty"`
 	Timestamp            string      `json:"timestamp,omitempty"`
 	Dependency           string      `json:"dependency,omitempty"`
 	ResponseTime         int64       `json:"responseTime,omitempty"`
@@ -57,7 +62,7 @@ type LogDto struct {
 	RecordType           string      `json:"recordType,omitempty"`
 	SessionId            string      `json:"sessionId,omitempty"`
 	TransactionId        string      `json:"transactionId,omitempty"`
-	RequestId           string      `json:"requestId,omitempty"`
+	RequestId            string      `json:"requestId,omitempty"`
 	AdditionalInfo       any         `json:"additionalInfo,omitempty"`
 	AppResult            string      `json:"appResult,omitempty"`
 	AppResultCode        string      `json:"appResultCode,omitempty"`
@@ -66,7 +71,7 @@ type LogDto struct {
 	AppResultHttpStatus  string      `json:"appResultHttpStatus,omitempty"`
 	AppResultType        string      `json:"appResultType,omitempty"`
 	Severity             string      `json:"severity,omitempty"`
-	Sequences            []Sequence  `json:"sequences,omitempty"` // List of event tags
+	Sequences            []Sequence  `json:"-"` // List of event tags
 }
 
 // type ISummaryLogService interface {
@@ -83,8 +88,50 @@ type LoggerService interface {
 	Errorf(format string, args ...any)
 	Error(args ...any)
 	Sync() error
+}
 
-	SummaryLog() *zap.Logger
+// defaultLoggerService is a default implementation of LoggerService using slog
+type defaultLoggerService struct {
+	logger *slog.Logger
+}
+
+func NewDefaultLoggerService() LoggerService {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{}))
+
+	return &defaultLoggerService{logger: logger}
+}
+
+func (l *defaultLoggerService) Debugf(format string, args ...any) {
+	l.logger.Debug(fmt.Sprintf(format, args...))
+}
+
+func (l *defaultLoggerService) Debug(args ...any) {
+	l.logger.Debug(fmt.Sprint(args...))
+}
+
+func (l *defaultLoggerService) Logf(format string, args ...any) {
+	l.logger.Info(fmt.Sprintf(format, args...)) // treat as general info
+}
+
+func (l *defaultLoggerService) Log(data string) {
+	l.logger.Info(data)
+}
+
+func (l *defaultLoggerService) Info(msg string) {
+	l.logger.Info(msg)
+}
+
+func (l *defaultLoggerService) Errorf(format string, args ...any) {
+	l.logger.Error(fmt.Sprintf(format, args...))
+}
+
+func (l *defaultLoggerService) Error(args ...any) {
+	l.logger.Error(fmt.Sprint(args...))
+}
+
+func (l *defaultLoggerService) Sync() error {
+	// slog doesn't require Sync like zap; return nil
+	return nil
 }
 
 // SummaryParamsType defines summary log parameters.

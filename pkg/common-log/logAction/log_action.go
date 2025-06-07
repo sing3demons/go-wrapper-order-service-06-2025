@@ -1,5 +1,7 @@
 package logAction
 
+import "strings"
+
 const (
 	Consuming    = "[CONSUMING]"
 	Producing    = "[PRODUCING]"
@@ -15,104 +17,114 @@ const (
 	Produced     = "[PRODUCED]"
 )
 
+type DBActionEnum string
+
+const (
+	DB_CREATE DBActionEnum = "CREATE"
+	DB_READ   DBActionEnum = "READ"
+	DB_UPDATE DBActionEnum = "UPDATE"
+	DB_DELETE DBActionEnum = "DELETE"
+	DB_NONE   DBActionEnum = "NONE"
+)
+
 type LoggerAction struct {
 	Action            string `json:"action"`
 	ActionDescription string `json:"actionDescription"`
 	SubAction         string `json:"subAction,omitempty"`
 }
 
-func CONSUMING(desc string, subAction string) LoggerAction {
+func CONSUMING(desc string, subAction ...string) LoggerAction {
 	return LoggerAction{
 		Action:            Consuming,
 		ActionDescription: desc,
-		SubAction:         subAction,
+		SubAction:         strings.Join(subAction, ", "),
 	}
 }
 
-func PRODUCING(desc string, subAction string) LoggerAction {
+func PRODUCING(desc string, subAction ...string) LoggerAction {
 	return LoggerAction{
 		Action:            Producing,
 		ActionDescription: desc,
-		SubAction:         subAction,
+		SubAction:         strings.Join(subAction, ", "),
 	}
 }
 
-func INBOUND(desc string, subAction string) LoggerAction {
+func INBOUND(desc string, subAction ...string) LoggerAction {
 	return LoggerAction{
 		Action:            Inbound,
 		ActionDescription: desc,
-		SubAction:         subAction,
+		SubAction:         strings.Join(subAction, ", "),
 	}
 }
 
-func OUTBOUND(desc string, subAction string) LoggerAction {
+func OUTBOUND(desc string, subAction ...string) LoggerAction {
 	return LoggerAction{
 		Action:            Outbound,
 		ActionDescription: desc,
-		SubAction:         subAction,
+		SubAction:         strings.Join(subAction, ", "),
 	}
 }
 
-func APP_LOGIC(desc string, subAction string) LoggerAction {
+func APP_LOGIC(desc string, subAction ...string) LoggerAction {
 	return LoggerAction{
 		Action:            AppLogic,
 		ActionDescription: desc,
-		SubAction:         subAction,
+		SubAction:         strings.Join(subAction, ", "),
 	}
 }
 
-func HTTP_REQUEST(desc string, subAction string) LoggerAction {
+func HTTP_REQUEST(desc string, subAction ...string) LoggerAction {
 	return LoggerAction{
 		Action:            HttpRequest,
 		ActionDescription: desc,
-		SubAction:         subAction,
+		SubAction:         strings.Join(subAction, ", "),
 	}
 }
 
-func HTTP_RESPONSE(desc string, subAction string) LoggerAction {
+func HTTP_RESPONSE(desc string, subAction ...string) LoggerAction {
 	return LoggerAction{
 		Action:            HttpResponse,
 		ActionDescription: desc,
-		SubAction:         subAction,
+		SubAction:         strings.Join(subAction, ", "),
 	}
 }
 
-func DB_REQUEST(desc string, subAction string) LoggerAction {
+func DB_REQUEST(operation DBActionEnum, subAction string) LoggerAction {
 	return LoggerAction{
 		Action:            DbRequest,
-		ActionDescription: desc,
-		SubAction:         subAction,
+		ActionDescription: subAction,
+		SubAction:         string(operation),
 	}
 }
 
-func DB_RESPONSE(desc string, subAction string) LoggerAction {
+func DB_RESPONSE(operation DBActionEnum, subAction string) LoggerAction {
 	return LoggerAction{
 		Action:            DbResponse,
-		ActionDescription: desc,
-		SubAction:         subAction,
+		ActionDescription: subAction,
+		SubAction:         string(operation),
 	}
 }
 
-func EXCEPTION(desc string, subAction string) LoggerAction {
+func EXCEPTION(desc string, subAction ...string) LoggerAction {
 	return LoggerAction{
 		Action:            Exception,
 		ActionDescription: desc,
-		SubAction:         subAction,
+		SubAction:         strings.Join(subAction, ", "),
 	}
 }
 
-func SYSTEM(desc string, subAction string) LoggerAction {
+func SYSTEM(desc string, subAction ...string) LoggerAction {
 	return LoggerAction{
 		Action:            System,
 		ActionDescription: desc,
-		SubAction:         subAction,
+		SubAction:         strings.Join(subAction, ", "),
 	}
 }
 
-func PRODUCED(desc string, subAction string) LoggerAction {
+func PRODUCED(desc string, subAction ...string) LoggerAction {
 	return LoggerAction{
 		Action:            Produced,
 		ActionDescription: desc,
-		SubAction:         subAction,
+		SubAction:         strings.Join(subAction, ", "),
 	}
 }

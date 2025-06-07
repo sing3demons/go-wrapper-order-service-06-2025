@@ -7,22 +7,23 @@ import (
 
 	"github.com/sing3demons/go-order-service/pkg/common-log/LogSeverity"
 	"github.com/sing3demons/go-order-service/pkg/common-log/masking"
-	"go.uber.org/zap"
 )
 
 type SummaryLogService interface {
 	Init(data LogDto)
 	Update(key string, value any)
 	Flush()
+	FlushError(data Stack)
+	End(data Stack)
 }
 type summaryLogService struct {
 	logDto         LogDto
-	logger         *zap.Logger
+	logger         LoggerService
 	maskingService masking.MaskingService
 	customLogger   *customLoggerService
 }
 
-func NewSummaryLogService(logger *zap.Logger, customLogger *customLoggerService) SummaryLogService {
+func NewSummaryLogService(logger LoggerService, customLogger *customLoggerService) SummaryLogService {
 	return &summaryLogService{
 		logger:         logger,
 		maskingService: *maskingService,
@@ -59,8 +60,7 @@ func (s *summaryLogService) Flush() {
 	s.Init(s.customLogger.logDto)
 	s.logDto.RecordType = "Summary"
 	s.logDto.DateTime = time.Unix(s.customLogger.utilService.now, 0).Format(time.RFC3339)
-	startTime := time.Unix(int64(s.customLogger.utilService.begin), 0)
-	s.logDto.ServiceTime = time.Since(startTime).Milliseconds() / 1000
+	s.logDto.ServiceTime = time.Since(s.customLogger.utilService.begin).Microseconds()
 
 	if s.customLogger.additionalSummary != nil {
 		s.logDto.AdditionalInfo = s.customLogger.additionalSummary
@@ -99,18 +99,21 @@ func (s *summaryLogService) Flush() {
 
 	if len(s.customLogger.summaryLogAdditionalInfo) > 0 {
 		s.logDto.Sequences = append(s.logDto.Sequences, s.customLogger.summaryLogAdditionalInfo...)
+		sequences := s.logDto.Sequences
+		jsonBytes, err := json.Marshal(sequences)
+		if err == nil {
+			s.logDto.Messages = string(jsonBytes)
+		}
+		s.logDto.Sequences = nil
 		s.customLogger.summaryLogAdditionalInfo = nil
 	}
 
 	s.clearNonSummaryLogParam()
 	jsonBytes, err := json.Marshal(s.logDto)
-	if err != nil {
-		s.logger.Error("Failed to marshal summary log data", zap.Error(err))
-		return
-
+	if err == nil {
+		info := string(jsonBytes)
+		s.logger.Info(info)
 	}
-	info := string(jsonBytes)
-	s.logger.Info(info)
 }
 
 type Stack struct {
@@ -125,8 +128,7 @@ func (s *summaryLogService) FlushError(data Stack) {
 	s.Init(s.customLogger.logDto)
 	s.logDto.RecordType = "Summary"
 	s.logDto.DateTime = time.Unix(s.customLogger.utilService.now, 0).Format(time.RFC3339)
-	startTime := time.Unix(int64(s.customLogger.utilService.begin), 0)
-	s.logDto.ServiceTime = time.Since(startTime).Milliseconds() / 1000
+	s.logDto.ServiceTime = time.Since(s.customLogger.utilService.begin).Microseconds()
 
 	if s.customLogger.additionalSummary != nil {
 		s.logDto.AdditionalInfo = s.customLogger.additionalSummary
@@ -160,19 +162,90 @@ func (s *summaryLogService) FlushError(data Stack) {
 	} else {
 		s.logDto.AppResultCode = "50000"
 	}
-
 	if len(s.customLogger.summaryLogAdditionalInfo) > 0 {
 		s.logDto.Sequences = append(s.logDto.Sequences, s.customLogger.summaryLogAdditionalInfo...)
+		sequences := s.logDto.Sequences
+		jsonBytes, err := json.Marshal(sequences)
+		if err == nil {
+			s.logDto.Messages = string(jsonBytes)
+		}
+		s.logDto.Sequences = nil
 		s.customLogger.summaryLogAdditionalInfo = nil
 	}
 
 	s.clearNonSummaryLogParam()
-	s.logDto.Message = toJSON(data)
 	jsonBytes, err := json.Marshal(s.logDto)
-	if err != nil {
-		s.logger.Error("Failed to marshal summary log data", zap.Error(err))
-		return
+	if err == nil {
+		info := string(jsonBytes)
+		s.logger.Info(info)
 	}
-	info := string(jsonBytes)
-	s.logger.Error(info)
+}
+
+func (s *summaryLogService) End(data Stack) {
+	s.Init(s.customLogger.logDto)
+	s.logDto.RecordType = "Summary"
+	s.logDto.DateTime = time.Unix(s.customLogger.utilService.now, 0).Format(time.RFC3339)
+	s.logDto.ServiceTime = time.Since(s.customLogger.utilService.begin).Microseconds()
+	if s.customLogger.additionalSummary != nil {
+		s.logDto.AdditionalInfo = s.customLogger.additionalSummary
+		s.customLogger.additionalSummary = nil
+	}
+
+	if data.Status != "" {
+		s.logDto.AppResultHttpStatus = data.Status
+	} else if s.customLogger.logDto.AppResultHttpStatus != "" {
+		s.logDto.AppResultHttpStatus = s.customLogger.logDto.AppResultHttpStatus
+	} else {
+		s.logDto.AppResultHttpStatus = "200"
+	}
+
+	if data.ResultType != "" {
+		s.logDto.AppResultType = data.ResultType
+	} else if s.customLogger.logDto.AppResultType != "" {
+		s.logDto.AppResultType = s.customLogger.logDto.AppResultType
+	} else {
+		s.logDto.AppResultType = "HEALTHY"
+	}
+
+	if data.Severity != "" {
+		s.logDto.Severity = data.Severity
+	} else if s.customLogger.logDto.Severity != "" {
+		s.logDto.Severity = s.customLogger.logDto.Severity
+	} else {
+		s.logDto.Severity = LogSeverity.NORMAL
+	}
+
+	if data.Message != "" {
+		s.logDto.AppResult = data.Message
+	} else if s.customLogger.logDto.AppResult != "" {
+		s.logDto.AppResult = s.customLogger.logDto.AppResult
+	} else {
+		s.logDto.AppResult = "Success"
+	}
+
+	if data.Code != "" {
+		s.logDto.AppResultCode = data.Code
+	} else if s.customLogger.logDto.AppResultCode != "" {
+		s.logDto.AppResultCode = s.customLogger.logDto.AppResultCode
+	} else {
+		s.logDto.AppResultCode = "20000"
+	}
+
+	if len(s.customLogger.summaryLogAdditionalInfo) > 0 {
+		s.logDto.Sequences = append(s.logDto.Sequences, s.customLogger.summaryLogAdditionalInfo...)
+		sequences := s.logDto.Sequences
+		jsonBytes, err := json.Marshal(sequences)
+		if err == nil {
+			s.logDto.Messages = string(jsonBytes)
+		}
+		s.logDto.Sequences = nil
+		s.customLogger.summaryLogAdditionalInfo = nil
+	}
+
+	s.clearNonSummaryLogParam()
+	jsonBytes, err := json.Marshal(s.logDto)
+	if err == nil {
+		info := string(jsonBytes)
+		s.logger.Info(info)
+	}
 }

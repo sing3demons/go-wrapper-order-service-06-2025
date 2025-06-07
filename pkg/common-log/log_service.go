@@ -3,6 +3,7 @@ package commonlog
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"reflect"
 	"strconv"
@@ -25,10 +26,11 @@ type CustomLoggerService interface {
 	Update(key string, value any)
 	Info(log logAction.LoggerAction, data any, options ...masking.MaskingOptionDto)
 	Debug(log logAction.LoggerAction, data any, options ...masking.MaskingOptionDto)
-	Error(log logAction.LoggerAction, data, stack any, options ...masking.MaskingOptionDto)
+	Error(log logAction.LoggerAction, data any, options ...masking.MaskingOptionDto)
 	SetSummaryLogErrorSource(param ErrorSourceType) CustomLoggerService
 	Flush()
-	AddSummary(params EventTag)
+	End(code int, message string)
+	SetSummary(params LogEventTag) CustomLoggerService
 	SetDependencyMetadata(metadata LogDependencyMetadata) CustomLoggerService
 
 	// setSummaryLogAdditionalInfo(key string, value any) CustomLoggerService
@@ -41,33 +43,34 @@ type customLoggerService struct {
 	additionalSummary        map[string]any
 	summaryLogAdditionalInfo []Sequence
 
-	logger LoggerService
-	// utilService    LoggerHelperService
+	detailLog      LoggerService
+	summaryLog     LoggerService
 	maskingService masking.MaskingService
-	utilService           *Timer
+	utilService    *Timer
 }
 
 var maskingService = masking.NewMaskingService()
 
 type Timer struct {
-	now   int64   // Unix timestamp in milliseconds
-	begin float64 // High-resolution time in milliseconds
+	now   int64     // Unix timestamp in milliseconds
+	begin time.Time // Duration since the start of the timer
 }
 
 func NewTimer() *Timer {
 	return &Timer{
 		now:   time.Now().UnixNano() / int64(time.Millisecond),
-		begin: float64(time.Now().UnixNano()) / 1e6, // same units as JS performance.now()
+		begin: time.Now(),
 	}
 }
 
-func NewLogger(logger LoggerService, time *Timer) CustomLoggerService {
+func NewLogger(detailLog LoggerService, summaryLog LoggerService, time *Timer) CustomLoggerService {
 	return &customLoggerService{
 		additionalSummary:         make(map[string]any),
-		logger:                    logger,
+		detailLog:                 detailLog,
+		summaryLog:                summaryLog,
 		maskingService:            *maskingService,
 		isSetSummaryLogParameters: false,
-		utilService:                    time,
+		utilService:               time,
 	}
 }
 
@@ -131,11 +134,10 @@ func (c *customLoggerService) Info(action logAction.LoggerAction, data any, opti
 
 	jsonBytes, err := json.MarshalIndent(c.logDto, "", "  ")
 	if err != nil {
-		c.logger.Error("Failed to marshal log data", err)
+		c.detailLog.Error("Failed to marshal log data", err)
 		return
 	}
-	c.logger.Log(string(jsonBytes))
-	// c.logDto = LogDto{}
+	c.detailLog.Log(string(jsonBytes))
 	c.logDto.SubAction = ""
 }
 
@@ -146,18 +148,18 @@ func (c *customLoggerService) Debug(action logAction.LoggerAction, data any, opt
 	c.logDto.SubAction = action.SubAction
 	c.logDto.Message = toJSON(cloned)
 	c.logDto.Timestamp = time.Now().Format(time.RFC3339)
-	c.logger.Debug(c.logDto)
+	c.detailLog.Debug(c.logDto)
 	c.logDto.SubAction = ""
 }
 
-func (c *customLoggerService) Error(action logAction.LoggerAction, data, stack any, options ...masking.MaskingOptionDto) {
+func (c *customLoggerService) Error(action logAction.LoggerAction, data any, options ...masking.MaskingOptionDto) {
 	cloned := cloneAndMask(data, options, c.maskingService)
 	c.logDto.Action = action.Action
 	c.logDto.ActionDescription = action.ActionDescription
 	c.logDto.SubAction = action.SubAction
 	c.logDto.Message = toJSON(cloned)
 	c.logDto.Timestamp = time.Now().Format(time.RFC3339) // c.utilService.SetTimestampFormat(time.Now())
-	c.logger.Error(c.logDto, stack)
+	c.detailLog.Error(c.logDto)
 	c.logDto.SubAction = ""
 }
 
@@ -171,7 +173,7 @@ func (c *customLoggerService) SetSummaryLogErrorSource(param ErrorSourceType) Cu
 	}
 	return c
 }
-func (c *customLoggerService) AddSummary(param EventTag) {
+func (c *customLoggerService) SetSummary(param LogEventTag) CustomLoggerService {
 	if c.summaryLogAdditionalInfo == nil {
 		c.summaryLogAdditionalInfo = make([]Sequence, 0)
 	}
@@ -196,7 +198,7 @@ func (c *customLoggerService) AddSummary(param EventTag) {
 					ResTime: param.ResTime,
 				})
 				c.summaryLogAdditionalInfo[i] = seq
-				return
+				return c
 			}
 		}
 	}
@@ -205,13 +207,137 @@ func (c *customLoggerService) AddSummary(param EventTag) {
 		Command: param.Command,
 		Result:  sequenceResult,
 	})
+	return c
 
 }
 
 func (c *customLoggerService) Flush() {
-	summaryLog := NewSummaryLogService(c.logger.SummaryLog(), c)
+	summaryLog := NewSummaryLogService(c.summaryLog, c)
 	summaryLog.Init(c.logDto)
 	summaryLog.Flush()
+	summaryLog = nil
+	c.logDto = LogDto{} // Reset logDto after flushing
+	c = nil
+}
+
+type resultCodeType struct {
+	StatusCode string `json:"status"`
+	ResultCode string `json:"resultCode"`
+	Message    string `json:"message"`
+}
+
+func ConvertTTTTT(input string) string {
+	return input + strings.Repeat("0", 5-len(input))
+
+}
+
+func mapHTTPStatusToSnakeCaseText(code int) string {
+	text := http.StatusText(code)
+	if text == "" {
+		return "unknown"
+	}
+	return toSnakeCase(text)
+}
+
+// Converts "Not Found" → "not_found"
+func toSnakeCase(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, " ", "_")
+	s = strings.ReplaceAll(s, "-", "_")
+	return s
+}
+
+func expandResultCode(code int) resultCodeType {
+	switch code {
+	case http.StatusOK:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusOK),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    "Success",
+		}
+	case http.StatusBadRequest:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusBadRequest),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	case http.StatusUnauthorized:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusUnauthorized),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	case http.StatusForbidden:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusForbidden),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	case http.StatusNotFound:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusNotFound),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	case http.StatusInternalServerError:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusInternalServerError),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	case http.StatusServiceUnavailable:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusServiceUnavailable),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	case http.StatusGatewayTimeout:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusGatewayTimeout),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	case http.StatusConflict:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusConflict),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	case http.StatusTooManyRequests:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusTooManyRequests),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	case http.StatusNotImplemented:
+		return resultCodeType{
+			StatusCode: strconv.Itoa(http.StatusNotImplemented),
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	default:
+		return resultCodeType{
+			StatusCode: "Error",
+			ResultCode: ConvertTTTTT(strconv.Itoa(code)),
+			Message:    mapHTTPStatusToSnakeCaseText(code),
+		}
+	}
+}
+
+func (c *customLoggerService) End(code int, message string) {
+	result := expandResultCode(code)
+	if message == "" {
+		message = result.Message
+	}
+	stack := Stack{
+		Code:    result.ResultCode,
+		Message: message,
+		Status:  result.StatusCode,
+	}
+	summaryLog := NewSummaryLogService(c.summaryLog, c)
+	summaryLog.Init(c.logDto)
+	summaryLog.End(stack)
 	summaryLog = nil
 	c.logDto = LogDto{} // Reset logDto after flushing
 	c = nil

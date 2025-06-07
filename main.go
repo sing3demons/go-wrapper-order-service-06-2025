@@ -5,8 +5,6 @@ import (
 
 	config "github.com/sing3demons/go-order-service/configs"
 	"github.com/sing3demons/go-order-service/mongo"
-	commonlog "github.com/sing3demons/go-order-service/pkg/common-log"
-	"github.com/sing3demons/go-order-service/pkg/common-log/logAction"
 	"github.com/sing3demons/go-order-service/pkg/logger"
 	"github.com/sing3demons/go-order-service/pkg/router"
 	"github.com/sing3demons/go-order-service/product"
@@ -18,7 +16,7 @@ func main() {
 	// conf.LoadConfigJson("configs/config.json")
 	conf.LoadEnv("configs")
 
-	log := logger.NewLogger(conf)
+	log := logger.NewLogger(conf.Log.App)
 	defer log.Sync()
 
 	mongoClient := mongo.New(mongo.Config{
@@ -34,10 +32,15 @@ func main() {
 	product.NewProductService(col)
 
 	app := router.NewApplication(conf, log)
+	app.LogDetail(logger.NewLogger(conf.Log.Detail))
+	app.LogSummary(logger.NewLogger(conf.Log.Summary))
+	app.StartKafka()
+
 	app.CreateTopic("product_created")
 
 	productService := product.NewProductService(col)
-	handler := product.NewHandler(productService)
+	handler := product.NewHandler()
+	consumer := product.NewProductConsumer(productService)
 
 	app.Post("/products", handler.CreateProduct)
 
@@ -51,28 +54,7 @@ func main() {
 	// 	return nil
 	// })
 
-	app.Consumer("product_created", func(c *router.Context) error {
-		var req router.KafkaPayload
-		if err := c.Bind(&req); err != nil {
-			c.Log.Error(logAction.CONSUMING("product_created", ""), "Failed to bind request body", err)
-			c.Log.AddSummary(commonlog.EventTag{
-				Node:        "consuming",
-				Command:     "product_created",
-				Code:        "400",
-				Description: err.Error(),
-			})
-			return err
-		}
-		c.Log.Info(logAction.CONSUMING("product_created", ""), req)
-		c.Log.AddSummary(commonlog.EventTag{
-			Node:        "consuming",
-			Command:     "product_created",
-			Code:        "",
-			Description: "success",
-		})
-		c.Log.Flush()
-		return nil
-	})
+	app.Consumer("product_created", consumer.CreateProduct)
 
 	app.Start()
 }
