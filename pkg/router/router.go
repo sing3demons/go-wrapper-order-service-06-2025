@@ -234,7 +234,7 @@ func (a *App) Consumer(topic string, handler SubscribeFunc) {
 	if a.conf.Kafka.AutoCreateTopic {
 		err := a.KafkaClient.CreateTopic(topic)
 		if err != nil {
-			a.Logger.Error("failed to create topic %s: %v", topic, err)
+			a.Logger.Errorf("failed to create topic %s: %v", topic, err)
 			return
 		}
 	}
@@ -287,7 +287,7 @@ func (a *App) Start() {
 	// Start Subscriptions
 	go func() {
 		if err := a.startSubscriptions(ctx); err != nil {
-			a.Logger.Error("Subscription Error: %v", err)
+			a.Logger.Errorf("Subscription Error: %v", err)
 		}
 	}()
 

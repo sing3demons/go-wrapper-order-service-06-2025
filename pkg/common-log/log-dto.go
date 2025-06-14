@@ -86,7 +86,7 @@ type LoggerService interface {
 	Log(data string)
 	Info(msg string)
 	Errorf(format string, args ...any)
-	Error(args ...any)
+	Error(args string)
 	Sync() error
 }
 
@@ -125,8 +125,8 @@ func (l *defaultLoggerService) Errorf(format string, args ...any) {
 	l.logger.Error(fmt.Sprintf(format, args...))
 }
 
-func (l *defaultLoggerService) Error(args ...any) {
-	l.logger.Error(fmt.Sprint(args...))
+func (l *defaultLoggerService) Error(args string) {
+	l.logger.Error(args)
 }
 
 func (l *defaultLoggerService) Sync() error {

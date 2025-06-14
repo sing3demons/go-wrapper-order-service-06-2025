@@ -6,6 +6,16 @@ services:
       #   - ./data/mongo:/data/db
       ports:
         - 27017:27017
+  postgres:
+    image: postgres:16.0
+    environment:
+      POSTGRES_DB: product_master
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: password
+    # volumes:
+    #   - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
   zookeeper:
     image: confluentinc/cp-zookeeper:latest
     environment:

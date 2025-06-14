@@ -22,7 +22,7 @@ type ILogger interface {
 	Log(data string)
 	Info(msg string)
 	Errorf(format string, args ...any)
-	Error(args ...any)
+	Error(args string)
 	Sync() error
 }
 
@@ -52,8 +52,8 @@ func (k *zLogger) Errorf(format string, args ...any) {
 	// fmt.Printf(format, args...)
 	k.Logger.Sugar().Errorf(format, args...)
 }
-func (k *zLogger) Error(args ...any) {
-	k.Logger.Sugar().Error(args...)
+func (k *zLogger) Error(args string) {
+	k.Logger.Error(args)
 }
 
 func NewLogger(cfg config.LogConfig) ILogger {

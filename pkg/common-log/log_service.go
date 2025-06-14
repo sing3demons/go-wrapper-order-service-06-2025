@@ -134,7 +134,7 @@ func (c *customLoggerService) Info(action logAction.LoggerAction, data any, opti
 
 	jsonBytes, err := json.MarshalIndent(c.logDto, "", "  ")
 	if err != nil {
-		c.detailLog.Error("Failed to marshal log data", err)
+		c.detailLog.Errorf("Failed to marshal log data: %v", err)
 		return
 	}
 	c.detailLog.Log(string(jsonBytes))
@@ -159,7 +159,12 @@ func (c *customLoggerService) Error(action logAction.LoggerAction, data any, opt
 	c.logDto.SubAction = action.SubAction
 	c.logDto.Message = toJSON(cloned)
 	c.logDto.Timestamp = time.Now().Format(time.RFC3339) // c.utilService.SetTimestampFormat(time.Now())
-	c.detailLog.Error(c.logDto)
+	jsonBytes, err := json.MarshalIndent(c.logDto, "", "  ")
+	if err != nil {
+		c.detailLog.Errorf("Failed to marshal log data: %v", err)
+		return
+	}
+	c.detailLog.Error(string(jsonBytes))
 	c.logDto.SubAction = ""
 }
 

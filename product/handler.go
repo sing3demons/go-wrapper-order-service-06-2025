@@ -29,7 +29,7 @@ func (h *handler) CreateProduct(ctx *router.Context) error {
 			Command:     cmd,
 			Code:        "400",
 			Description: err.Error(),
-		}).Error(logAction.INBOUND(cmd, ""), err.Error())
+		}).Error(logAction.INBOUND(cmd), err.Error())
 
 		return ctx.JSON(400, map[string]string{"error": "Invalid request body"})
 	}
@@ -39,7 +39,7 @@ func (h *handler) CreateProduct(ctx *router.Context) error {
 		Command:     cmd,
 		Code:        "",
 		Description: "success",
-	}).Info(logAction.INBOUND(cmd, ""), map[string]any{
+	}).Info(logAction.INBOUND(cmd), map[string]any{
 		"headers": ctx.Headers(),
 		"body":    body,
 	})

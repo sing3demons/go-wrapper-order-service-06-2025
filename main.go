@@ -5,8 +5,10 @@ import (
 
 	config "github.com/sing3demons/go-order-service/configs"
 	"github.com/sing3demons/go-order-service/mongo"
+	"github.com/sing3demons/go-order-service/order"
 	"github.com/sing3demons/go-order-service/pkg/logger"
 	"github.com/sing3demons/go-order-service/pkg/router"
+	"github.com/sing3demons/go-order-service/postgres"
 	"github.com/sing3demons/go-order-service/product"
 )
 
@@ -25,11 +27,14 @@ func main() {
 		Database: "order_service",
 	})
 	mongoClient.UseLogger(log)
-
 	mongoClient.Connect()
-
 	col := mongoClient.Collection("products")
-	product.NewProductService(col)
+
+	postgresClient, err := postgres.New()
+	if err != nil {
+		log.Errorf("Failed to connect to PostgreSQL", err)
+		os.Exit(1)
+	}
 
 	app := router.NewApplication(conf, log)
 	app.LogDetail(logger.NewLogger(conf.Log.Detail))
@@ -42,7 +47,13 @@ func main() {
 	handler := product.NewHandler()
 	consumer := product.NewProductConsumer(productService)
 
+	orderService := order.New(postgresClient)
+	orderHandler := order.NewHandler(orderService)
+
 	app.Post("/products", handler.CreateProduct)
+	app.Post("/orders", orderHandler.CreateOrder)
+	app.Get("/orders/{id}", orderHandler.GetOrderById)
+	app.Get("/orders", orderHandler.GetOrders)
 
 	// app.Consumer("test-topic", func(c *router.Context) error {
 	// 	var msg string
@@ -50,6 +61,7 @@ func main() {
 	// 		fmt.Println("Error binding message:", err)
 	// 		return err
 	// 	}
+
 	// 	fmt.Println("Received message:", msg)
 	// 	return nil
 	// })

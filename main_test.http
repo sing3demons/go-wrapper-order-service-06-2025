@@ -5,3 +5,13 @@ Content-Type: application/json
   "name": "The Hobbit",
   "price": "100"
 }
+
+###
+POST http://localhost:8080/orders HTTP/1.1
+Content-Type: application/json
+
+{
+  "status": "active",
+  "customer_id": "8C2DBCD3-54A8-4474-BD80-10152CBDB904",
+  "products": ["mac book", "iphone"]
+}
