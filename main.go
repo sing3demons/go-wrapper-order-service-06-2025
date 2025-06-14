@@ -55,16 +55,6 @@ func main() {
 	app.Get("/orders/{id}", orderHandler.GetOrderById)
 	app.Get("/orders", orderHandler.GetOrders)
 
-	// app.Consumer("test-topic", func(c *router.Context) error {
-	// 	var msg string
-	// 	if err := c.Bind(&msg); err != nil {
-	// 		fmt.Println("Error binding message:", err)
-	// 		return err
-	// 	}
-
-	// 	fmt.Println("Received message:", msg)
-	// 	return nil
-	// })
 
 	app.Consumer("product_created", consumer.CreateProduct)
 

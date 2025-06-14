@@ -22,7 +22,7 @@ func (h *consumer) CreateProduct(c *router.Context) error {
 	if err := c.Bind(&req); err != nil {
 		c.Log.SetSummary(commonlog.LogEventTag{
 			Node:        "consuming",
-			Command:     c.Param("topic"),
+			Command:     c.QueryParam("topic"),
 			Code:        "400",
 			Description: err.Error(),
 		}).Error(logAction.CONSUMING("product_created"), err.Error())
@@ -31,10 +31,10 @@ func (h *consumer) CreateProduct(c *router.Context) error {
 	}
 	c.Log.SetSummary(commonlog.LogEventTag{
 		Node:        "consuming",
-		Command:     c.Param("topic"),
+		Command:     c.QueryParam("topic"),
 		Code:        "",
 		Description: "success",
-	}).Info(logAction.CONSUMING(c.Param("topic")), req)
+	}).Info(logAction.CONSUMING(c.QueryParam("topic")), req)
 
 	var body ProductInfo
 	byteData, err := json.Marshal(req.Body)

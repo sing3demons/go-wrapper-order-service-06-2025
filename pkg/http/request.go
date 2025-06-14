@@ -64,7 +64,12 @@ func NewRequest(r *http.Request) *Request {
 }
 
 // Param returns the query parameter with the given key.
-func (r *Request) Param(key string) string {
+func (r *Request) Param(key string) map[string]string {
+	return r.pathParams
+}
+
+// QueryParam returns the query parameter with the given key.
+func (r *Request) QueryParam(key string) string {
 	return r.req.URL.Query().Get(key)
 }
 

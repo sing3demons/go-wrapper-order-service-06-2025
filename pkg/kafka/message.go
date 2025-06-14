@@ -120,8 +120,38 @@ func (m *Message) Headers() map[string]any {
 
 	return headers
 }
+func (m *Message) Param(p string) map[string]string {
+	params := make(map[string]string)
+	if p == "topic" {
+		params["topic"] = m.Topic
+	}
+	if m.ctx != nil {
+		if sessionId, ok := m.ctx.Value(SessionIdKey).(string); ok && sessionId != "" {
+			params["sessionId"] = sessionId
+		}
+		if transactionId, ok := m.ctx.Value(TransactionIdKey).(string); ok && transactionId != "" {
+			params["transactionId"] = transactionId
+		}
+		if requestId, ok := m.ctx.Value(RequestIdKey).(string); ok && requestId != "" {
+			params["requestId"] = requestId
+		}
+	}
+	if m.sessionId != "" {
+		params["sessionId"] = m.sessionId
+	}
+	if m.transactionId != "" {
+		params["transactionId"] = m.transactionId
+	}
+	if m.requestId != "" {
+		params["requestId"] = m.requestId
+	}
+	if m.Header.Broker != "" {
+		params["broker"] = m.Header.Broker
+	}
 
-func (m *Message) Param(p string) string {
+	return params
+}
+func (m *Message) QueryParam(p string) string {
 	if p == "topic" {
 		return m.Topic
 	}
@@ -143,7 +173,7 @@ func (m *Message) RequestId() string {
 }
 
 func (m *Message) PathParam(p string) string {
-	return m.Param(p)
+	return m.QueryParam(p)
 }
 
 // Bind binds the message value to the input variable. The input should be a pointer to a variable.
@@ -213,7 +243,7 @@ func (m *Message) HostName() string {
 	return m.config.Broker
 }
 
-func (m *Message)  Method() string {
+func (m *Message) Method() string {
 	return "kafka"
 }
 func (m *Message) URL() string {

@@ -26,7 +26,8 @@ type Context struct {
 
 type Request interface {
 	Context() context.Context
-	Param(string) string
+	Param(string) map[string]string
+	QueryParam(string) string
 	PathParam(string) string
 	Bind(any) error
 	HostName() string

@@ -80,7 +80,7 @@ func (h *Handler) GetOrderById(ctx *router.Context) error {
 			"headers": ctx.Headers(),
 			"url":     ctx.URL(),
 			"method":  ctx.Method(),
-			"param":   map[string]string{"id": id},
+			"param":   ctx.Param("id"),
 		})
 		return ctx.JSON(400, map[string]string{"error": "Invalid order ID format"})
 	}
