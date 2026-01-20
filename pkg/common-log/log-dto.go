@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 )
 
 // ErrorSourceType represents the source of an error.
@@ -30,6 +31,43 @@ type LogEventTag struct {
 	Code        string
 	Description string
 	ResTime     int64
+	startTime   time.Time
+}
+
+func NewEventTag(node, command string) LogEventTag {
+	return LogEventTag{
+		Node:        node,
+		Command:     command,
+		Description: "success",
+		startTime:   time.Now(),
+	}
+}
+
+func (e LogEventTag) WithResult(code, description string, resTime int64) LogEventTag {
+	e.Code = code
+	e.Description = description
+	e.ResTime = resTime
+	return e
+}
+
+func (e LogEventTag) CompleteResult(code, description string) LogEventTag {
+	e.Code = code
+	e.Description = description
+	e.ResTime = time.Since(e.startTime).Milliseconds()
+	return e
+}
+
+func (e LogEventTag) Update(code, description string) LogEventTag {
+	e.Code = code
+	e.Description = description
+	return e
+}
+
+func (e LogEventTag) End() LogEventTag {
+	e.Code = "200"
+	e.Description = "success"
+	e.ResTime = time.Since(e.startTime).Milliseconds()
+	return e
 }
 
 // LogDto represents a Data Transfer Object (DTO) for logging information.

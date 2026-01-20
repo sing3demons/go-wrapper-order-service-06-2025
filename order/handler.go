@@ -47,13 +47,9 @@ func (h *Handler) CreateOrder(ctx *router.Context) error {
 }
 
 func (h *Handler) GetOrders(ctx *router.Context) error {
-	summary := commonlog.LogEventTag{
-		Node:        "client",
-		Command:     "get_orders",
-		Code:        "",
-		Description: "Retrieving all orders",
-	}
-	ctx.Log.SetSummary(summary).Info(logAction.INBOUND("get_orders"), map[string]any{
+	summary := commonlog.NewEventTag("client", "get_orders")
+
+	ctx.Log.SetSummary(summary).Info(logAction.INBOUND(summary.Command), map[string]any{
 		"headers": ctx.Headers(),
 	})
 	orders, err := h.store.GetAll(ctx)
@@ -64,34 +60,23 @@ func (h *Handler) GetOrders(ctx *router.Context) error {
 }
 
 func (h *Handler) GetOrderById(ctx *router.Context) error {
-	summary := commonlog.LogEventTag{
-		Node:        "client",
-		Command:     "get_order_by_id",
-		Code:        "",
-		Description: "success",
-	}
+	summary := commonlog.NewEventTag("client", "get_order_by_id")
 	id := ctx.PathParam("id")
-
-	orderId, err := uuid.Parse(id)
-	if err != nil {
-		summary.Code = "400"
-		summary.Description = "Invalid order ID format"
-		ctx.Log.SetSummary(summary).Error(logAction.INBOUND("get_order_by_id"), map[string]any{
-			"headers": ctx.Headers(),
-			"url":     ctx.URL(),
-			"method":  ctx.Method(),
-			"param":   ctx.Param("id"),
-		})
-		return ctx.JSON(400, map[string]string{"error": "Invalid order ID format"})
-	}
-
-	ctx.Log.SetSummary(summary).Info(logAction.INBOUND("get_order_by_id"), map[string]any{
+	inbound := map[string]any{
 		"headers": ctx.Headers(),
 		"url":     ctx.URL(),
 		"method":  ctx.Method(),
-		"param":   map[string]string{"id": id},
-	})
-	order, err := h.store.GetByID(ctx, orderId)
+		"param":   ctx.Param("id"),
+	}
+
+	_, err := uuid.Parse(id)
+	if err != nil {
+		ctx.Log.SetSummary(summary.Update("400", "Invalid order ID format")).Error(logAction.INBOUND(summary.Command), inbound)
+		return ctx.JSON(400, map[string]string{"error": "Invalid order ID format"})
+	}
+
+	ctx.Log.SetSummary(summary).Info(logAction.INBOUND("get_order_by_id"), inbound)
+	order, err := h.store.GetByID(ctx, id)
 	if err != nil {
 		return ctx.JSON(500, map[string]string{"error": "Failed to retrieve order"})
 	}

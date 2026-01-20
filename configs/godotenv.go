@@ -126,7 +126,7 @@ func (e *EnvLoader) read(folder string) *Config {
 			BatchTimeout:    parseInt("KAFKA_BATCH_TIMEOUT", 1000),
 			ConsumerGroupID: e.GetOrDefault("KAFKA_CONSUMER_GROUP_ID", "default-group"),
 			Partition:       parseInt("KAFKA_PARTITION", 0),
-
+			AutoCreateTopic: parseBool("KAFKA_AUTO_CREATE_TOPIC", true),
 		},
 		TracerHost: e.GetOrDefault("TRACER_HOST", "localhost:4317"),
 	}

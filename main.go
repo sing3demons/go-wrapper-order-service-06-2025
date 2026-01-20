@@ -12,6 +12,7 @@ import (
 	"github.com/sing3demons/go-order-service/product"
 )
 
+
 func main() {
 	conf := config.NewConfig()
 
@@ -41,7 +42,6 @@ func main() {
 	app.LogSummary(logger.NewLogger(conf.Log.Summary))
 	app.StartKafka()
 
-	app.CreateTopic("product_created")
 
 	productService := product.NewProductService(col)
 	handler := product.NewHandler()
@@ -54,7 +54,6 @@ func main() {
 	app.Post("/orders", orderHandler.CreateOrder)
 	app.Get("/orders/{id}", orderHandler.GetOrderById)
 	app.Get("/orders", orderHandler.GetOrders)
-
 
 	app.Consumer("product_created", consumer.CreateProduct)
 

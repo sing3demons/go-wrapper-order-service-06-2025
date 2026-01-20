@@ -17,7 +17,7 @@ import (
 type StoreOrder interface {
 	Create(ctx *router.Context, order *Order) (*Order, error)
 	GetAll(ctx *router.Context) ([]Order, error)
-	GetByID(ctx *router.Context, id uuid.UUID) (*Order, error)
+	GetByID(ctx *router.Context, id string) (*Order, error)
 	Update(ctx *router.Context, order *Order) (*Order, error)
 	Delete(ctx *router.Context, id string) error
 }
@@ -158,14 +158,18 @@ func (s store) GetAll(ctx *router.Context) ([]Order, error) {
 	return orders, nil
 }
 
-func (s store) parseToUUID(id string) uuid.UUID {
+func (s store) parseToUUID(id string) (uuid.UUID, error) {
 	parsedID, err := uuid.Parse(id)
 	if err != nil {
-		return uuid.Nil
+		return uuid.Nil, err
 	}
-	return parsedID
+	return parsedID, nil
 }
-func (s store) GetByID(ctx *router.Context, id uuid.UUID) (*Order, error) {
+func (s store) GetByID(ctx *router.Context, id string) (*Order, error) {
+	uid, err := s.parseToUUID(id)
+	if err != nil {
+		return nil, err
+	}
 	query := "SELECT id, customer_id, products, status FROM orders WHERE id=$1 and deleted_at IS NULL"
 	summary := commonlog.LogEventTag{
 		Node:        "postgres",
@@ -177,11 +181,11 @@ func (s store) GetByID(ctx *router.Context, id uuid.UUID) (*Order, error) {
 	ctx.Log.Info(logAction.DB_REQUEST(logAction.DB_READ, summary.Command), map[string]any{
 		"table":  "orders",
 		"query":  query,
-		"params": id,
+		"params": uid,
 		// "raw_data": strings.Replace(query, "$1", id, -1),
 	})
 
-	row := s.db.QueryRow(query, id)
+	row := s.db.QueryRow(query, uid)
 	var order Order
 	if err := row.Scan(&order.ID, &order.CustomerID, pq.Array(&order.Products), &order.Status); err != nil {
 		if err == sql.ErrNoRows {
